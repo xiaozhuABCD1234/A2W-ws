@@ -98,6 +98,10 @@ ros2 launch point_lio mapping_mid360.launch.py rviz:=false
   输入路径:`livox_handler` 按 `x,y,z,intensity(float32),tag,line(uint8),timestamp(float64)`
   解析 `xfer_format=0` 的点云,以绝对 ns 时间戳减去帧头得到相对时间,
   再按 `timestamp_unit` 换算为 ms。取代了原 CustomMsg 路径。
+- 删除 `.gitmodules` —— 上游遗留的死配置:声明 `ikd-Tree` 与 `include/IKFoM` 为子模块,
+  但实际两者均已 vendored 成普通文件(无 gitlink),且 `ikd-Tree` 声明路径与实际的
+  `include/ikd-Tree/` 不符。扁平化后已无子模块关系,保留会误导并可能被
+  `git submodule update` 覆写掉 vendored 代码。
 
 ### 上游历史备份
 
