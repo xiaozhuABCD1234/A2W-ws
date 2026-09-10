@@ -1,5 +1,12 @@
 /**:
     ros__parameters:
+        # tf 的 child frame。上游默认 "aft_mapped",但 /cloud_registered_body
+        # 的 header.frame_id 在 laserMapping.cpp 里是硬编码的 "body",
+        # 两者不一致 → octomap_server 用 lookupTransform(camera_init, body)
+        # 会直接失败(表现为 Message Filter dropping / Transform error)。
+        # 统一成 body。
+        odom_child_frame_id: "body"
+
         common:
             lid_topic: "/livox/lidar"
             imu_topic: "/livox/imu"
@@ -51,7 +58,11 @@
         publish:
             path_en: true                 # false: close the path output
             scan_publish_en: true         # false: close all the point cloud output
-            scan_bodyframe_pub_en: false  # true: output the point cloud scans in IMU-body-frame
+            scan_bodyframe_pub_en: true   # true: output the point cloud scans in IMU-body-frame
+            # ↑ 置 true 才会发 /cloud_registered_body(机体系点云)。
+            #   octomap_server 必须吃机体系点云:它把
+            #   lookupTransform(frame_id, cloud.frame_id) 的平移当作射线起点,
+            #   喂世界系的 /cloud_registered 会让射线全从世界原点射出,自由空间是错的。
 
         pcd_save:
             pcd_save_en: false

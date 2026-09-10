@@ -25,8 +25,11 @@ nmcli connection show --active
 
 ```bash
 sudo apt install -y ros-jazzy-pcl-ros libapr1-dev libaprutil1-dev
+sudo apt install -y ros-jazzy-octomap-server ros-jazzy-octomap-msgs ros-jazzy-octomap-rviz-plugins
 rosdep check --from-paths src --ignore-src
 ```
+
+`octomap-*` 只有 `mid360_bringup` 用到(3D 占据栅格),不装也能跑驱动 + point_lio。
 
 还需系统级安装 `livox_lidar_sdk`(提供 `liblivox_lidar_sdk_shared.so` 到 `/usr/local/lib`)。
 
@@ -71,10 +74,91 @@ ros2 launch point_lio mapping_mid360.launch.py rviz:=false
 
 `odom_only:=true` 时里程计改名 `/odom_corrected`。
 
+### 坐标系
+
+| frame | 谁发的 | 说明 |
+|---|---|---|
+| `camera_init` | point_lio(odom 父帧) | 世界系 / 建图原点,重力对齐 |
+| `body` | point_lio(tf 子帧) | IMU 机体系。重力方向为 -z |
+
+point_lio 只发这两帧之间的一个 tf(`camera_init → body`),没有 URDF。
+
 ### 验证脚本
 
 仓库外(临时)有两个验证脚本:`/tmp/verify_mid360.sh`(仅驱动)、
 `/tmp/e2e_test.sh`(驱动 + point_lio 端到端)。
+
+## 3D 占据栅格(octomap)
+
+把 point_lio 的点云变成 octomap 三维占据栅格(可再投影出 2D 栅格给 nav2)。
+
+```bash
+# 终端 1、2 先把驱动 + point_lio 起起来(见上一节),然后:
+source ~/Projects/ros_ws/install/setup.zsh
+ros2 launch mid360_bringup octomap_mid360.launch.py
+```
+
+### 为什么是 `/cloud_registered_body` 而不是 `/cloud_registered`
+
+这是接 octomap 最容易踩的坑。octomap_server(ROS 2 分支源码
+`octomap_server.cpp` / `insertCloudCallback`)把射线起点算成:
+
+```cpp
+// sensor_to_world = lookupTransform(world_frame_id_, cloud->header.frame_id, ...)
+const auto & t = sensor_to_world_transform_stamped.transform.translation;
+insertScan(tf2::Vector3{t.x, t.y, t.z}, pc_ground, pc_nonground);
+```
+
+即:**射线起点就是“点云所在坐标系”在 `frame_id` 下的平移量**。
+
+- 喂 `/cloud_registered`(header.frame_id 已经是 `camera_init` == `frame_id`)→
+  查找出来是单位变换 → 射线全从**世界原点**射出。占据体素依旧是对的(rviz 里
+  地图看着很正常),但自由空间被整片刷错,远处墉面会被从背面清空——2D 投影和
+  后续导航都会遇到鬼影墙。
+- 喂 `/cloud_registered_body`(header.frame_id = `body`)→ 射线起点 = 机器人当前
+  位置,这才是传感器模型该有的样子。
+
+所以 `mid360.yaml` 里把 `publish.scan_bodyframe_pub_en` 改成了 `true`,
+并将 `odom_child_frame_id` 从上游默认的 `aft_mapped` 改为 `body` ——
+因为 `/cloud_registered_body` 的 frame_id 在 `laserMapping.cpp:593` 是硬编码的
+`"body"`,不统一的话 octomap_server 会直接卡在
+`Message Filter dropping message: frame 'body'` / `Transform error`。
+
+### 输出
+
+| 话题 | 类型 | 说明 |
+|---|---|---|
+| `/octomap_full` | `octomap_msgs/Octomap` | 完整栅格(rviz 的 Octomap display 訂这个) |
+| `/octomap_binary` | `octomap_msgs/Octomap` | 无损压缩版 |
+| `/octomap_point_cloud_centers` | `sensor_msgs/PointCloud2` | 占据体素中心点云 |
+| `/occupied_cells_vis_array` | `MarkerArray` | 按 octree 深度分组的立方体 |
+| `/projected_map` | `nav_msgs/OccupancyGrid` | 2D 投影,给 nav2 / costmap |
+
+服务:`/octomap_server/octomap_full`、`/octomap_server/octomap_binary`(配合
+`ros2 run octomap_server octomap_saver` 存盘)、`/octomap_server/clear_bbox`。
+
+### 调参
+
+都在 `src/mid360_bringup/config/octomap_mid360.yaml`,常用两个可以直接命令行覆盖:
+
+```bash
+ros2 launch mid360_bringup octomap_mid360.launch.py resolution:=0.2 max_range:=30.0
+```
+
+- `resolution` 体素边长。0.1 m 够用;调大省内存/CPU。
+- `sensor_model.max_range` 射线截断距离。默认 20 m;
+  Mid-360 本身量程 100 m,不截断会让 10 Hz 的射线投射量爆炸、地图无限膨胀。
+- `occupancy_min_z/max_z` 只有这一高度带内的体素进 2D 投影。
+
+### 性能与漂移
+
+- 开启 octomap_server 后多了一个吃 10 Hz 稠密点云的 C++ 节点。若 CPU 吃紧,
+  先把 `sensor_model.max_range` 调到 10~15 m,或把 point_lio 的
+  `point_filter_num` / `filter_size_surf` 调大。
+- **没有回环检测**:point_lio 是纯 LIO,长时间绕回来会有漂移,octomap 会把
+  同一面墙叠成两层。短时间建图没问题,要长期一致得先上 FAST-LIO-SAM 那类回环。
+- 跑完想存地图:`ros2 run octomap_server octomap_saver -f ~/map`(需先让
+  节点发布 `/octomap_full`;另 `.bt` 可用 `octovis` 看)。
 
 ## 与上游的差异
 
@@ -105,6 +189,14 @@ ros2 launch point_lio mapping_mid360.launch.py rviz:=false
   但实际两者均已 vendored 成普通文件(无 gitlink),且 `ikd-Tree` 声明路径与实际的
   `include/ikd-Tree/` 不符。扁平化后已无子模块关系,保留会误导并可能被
   `git submodule update` 覆写掉 vendored 代码。
+- `config/mid360.yaml` —— 为配合 octomap:`odom_child_frame_id` 由上游默认的
+  `aft_mapped` 改为 `body`(与 `/cloud_registered_body` 硬编码的 frame_id 对齐,否则
+  octomap_server 拿不到 tf);`publish.scan_bodyframe_pub_en` 改为 `true`。
+
+### mid360_bringup(**本仓库新增包**,非上游)
+
+只放集成用的 launch / config,无编译产物。目前包含 `launch/octomap_mid360.launch.py`
+(point_lio → octomap 三维占据栅格,见 README「3D 占据栅格」一节)。
 
 ### 上游历史备份
 
