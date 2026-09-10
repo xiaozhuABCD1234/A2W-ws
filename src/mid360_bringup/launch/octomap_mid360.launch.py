@@ -2,13 +2,16 @@
 
 前置(另开终端,先跑起来):
     ros2 launch livox_ros_driver2 msg_MID360_launch.py
-    ros2 launch point_lio mapping_mid360.launch.py rviz:=false
+    ros2 launch point_lio mapping_mid360.launch.py rviz:=false   # 关掉 point_lio 自己的 rviz
 
-本 launch 只负责 octomap_server 这一层,方便单独重启/调参。
+本 launch 只负责 octomap_server + rviz 这一层,方便单独重启/调参。
 
     ros2 launch mid360_bringup octomap_mid360.launch.py
     ros2 launch mid360_bringup octomap_mid360.launch.py resolution:=0.2 max_range:=30.0
-    ros2 launch mid360_bringup octomap_mid360.launch.py rviz:=true
+    ros2 launch mid360_bringup octomap_mid360.launch.py rviz:=true   # 单窗口:octomap + LIO 点云 + path
+
+日常一键启动(驱动 + point_lio + octomap + rviz):
+    ros2 launch mid360_bringup mid360.launch.py
 
 输出:
     /octomap_full, /octomap_binary   octomap_msgs/Octomap(3D 栅格)
@@ -70,6 +73,9 @@ def generate_launch_description():
         executable='rviz2',
         name='rviz2',
         output='screen',
+        arguments=['-d', PathJoinSubstitution([
+            FindPackageShare('mid360_bringup'), 'rviz', 'octomap_mid360.rviz'
+        ])],
         condition=IfCondition(LaunchConfiguration('rviz')),
     )
 

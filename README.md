@@ -62,6 +62,17 @@ source ~/Projects/ros_ws/install/setup.zsh
 ros2 launch point_lio mapping_mid360.launch.py rviz:=false
 ```
 
+### 一键启动(驱动 + point_lio + octomap + rviz)
+
+```bash
+source ~/Projects/ros_ws/install/setup.zsh
+ros2 launch mid360_bringup mid360.launch.py
+```
+
+这一个命令把四样都拉起来,rviz 单窗口显示 octomap + LIO 点云 + path(配置在
+`src/mid360_bringup/rviz/octomap_mid360.rviz`)。想手动分部启动或单独调参,
+照下面三终端的方式。
+
 ### 话题
 
 | 话题 | 类型 | 频率 |
@@ -93,10 +104,19 @@ point_lio 只发这两帧之间的一个 tf(`camera_init → body`),没有 URDF�
 把 point_lio 的点云变成 octomap 三维占据栅格(可再投影出 2D 栅格给 nav2)。
 
 ```bash
-# 终端 1、2 先把驱动 + point_lio 起起来(见上一节),然后:
+# 方式一(推荐):一键启动全部
+ros2 launch mid360_bringup mid360.launch.py
+
+# 方式二:分部启动,octomap 单独跑
+# 终端 1、2 先把驱动 + point_lio 起起来(见上一节,point_lio 用 rviz:=false),然后:
 source ~/Projects/ros_ws/install/setup.zsh
-ros2 launch mid360_bringup octomap_mid360.launch.py
+ros2 launch mid360_bringup octomap_mid360.launch.py rviz:=true
 ```
+
+说明:octomap 的 rviz 是**单窗口**(自带 `rviz/octomap_mid360.rviz`,同时显示
+`/octomap_full`、`/cloud_registered`、`/path`、TF),所以 point_lio 那边用
+`rviz:=false` 关掉它自己的 rviz,别开两个窗口。rviz 里 Octomap 那个 display
+对应 `octomap_rviz_plugins` 插件,不是默认的 PointCloud2。
 
 ### 为什么是 `/cloud_registered_body` 而不是 `/cloud_registered`
 
