@@ -55,14 +55,18 @@ Visualization Manager:
       Color: 255; 80; 80
       Buffer Length: 1
 
-    # octomap 三维占据栅格
-    - Class: octomap_rviz_plugins/Octomap
+    # octomap 体素中心点云(替代 rviz 插件:本机 octomap_rviz_plugins 2.1.0 与
+    # liboctomap 1.9.7 ABI 不兼容,Octomap/OccupancyGrid display 加载会报
+    # undefined symbol OcTreeStamped。等装了匹配版本后再换回插件显示。)
+    - Class: rviz_default_plugins/PointCloud2
       Name: Octomap
       Enabled: true
       Topic:
-        Value: /octomap_full
-      Color Scheme: 1
-      Alpha: 0.8
+        Value: /octomap_point_cloud_centers
+      Style: Points
+      Size (Pixels): 3
+      Color Transformer: FlatColor
+      Color: 255; 140; 0
 
     # 坐标系(只有 camera_init ↔ body 两条)
     - Class: rviz_default_plugins/TF

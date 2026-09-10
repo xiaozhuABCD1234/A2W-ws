@@ -69,8 +69,12 @@ source ~/Projects/ros_ws/install/setup.zsh
 ros2 launch mid360_bringup mid360.launch.py
 ```
 
-这一个命令把四样都拉起来,rviz 单窗口显示 octomap + LIO 点云 + path(配置在
-`src/mid360_bringup/rviz/octomap_mid360.rviz`)。想手动分部启动或单独调参,
+这一个命令把四样都拉起来,rviz 单窗口显示 octomap 体素 + LIO 点云 + path(配置在
+`src/mid360_bringup/rviz/octomap_mid360.rviz`)。一键模式下 rviz 由
+`mid360.launch.py` 直接启动,关闭它用 `show_rviz:=false`(不用 `rviz:=false`
+——launch 的 include 会把子 launch 的 `rviz` 参数写进共享配置,连父级一起改掉,
+详见 `mid360.launch.py` 头注释)。`resolution=`/`max_range=` 这类调参请在
+`octomap_mid360.launch.py` 那层做。想手动分部启动或单独调参,
 照下面三终端的方式。
 
 ### 话题
@@ -114,9 +118,20 @@ ros2 launch mid360_bringup octomap_mid360.launch.py rviz:=true
 ```
 
 说明:octomap 的 rviz 是**单窗口**(自带 `rviz/octomap_mid360.rviz`,同时显示
-`/octomap_full`、`/cloud_registered`、`/path`、TF),所以 point_lio 那边用
-`rviz:=false` 关掉它自己的 rviz,别开两个窗口。rviz 里 Octomap 那个 display
-对应 `octomap_rviz_plugins` 插件,不是默认的 PointCloud2。
+`/octomap_point_cloud_centers`、`/cloud_registered`、`/path`、TF),所以
+point_lio 那边用 `rviz:=false` 关掉它自己的 rviz,别开两个窗口。
+
+> 3D 栅格为什么用点云显示:rviz 的 octomap 插件(`octomap_rviz_plugins`,
+> Jazzy 2.3.x 里叫 `OccupancyGrid`)在本机加载报
+> `undefined symbol: octomap::OcTreeStamped` —— 插件 2.1.0 与系统
+> `liboctomap` 1.9.7 ABI 不匹配,是发行包打包问题,不是我们的配置问题。
+> 所以默认用 `/octomap_point_cloud_centers`(占据体素中心的点云,标准
+> PointCloud2 display,零插件依赖);装到匹配版本的插件后可换回
+> `octomap_rviz_plugins/OccupancyGrid` 订阅 `/octomap_full` 看体素方块。
+
+⚠️ 一键启动(`mid360.launch.py`)时 rviz 是父 launch 直接起的,不带
+`resolution=`/`max_range=` 透传;要调这两个参数用分部启动
+(`ros2 launch mid360_bringup octomap_mid360.launch.py resolution:=0.2 max_range:=30.0`)。
 
 ### 为什么是 `/cloud_registered_body` 而不是 `/cloud_registered`
 
