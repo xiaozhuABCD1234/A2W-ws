@@ -41,17 +41,18 @@ source install/setup.zsh
 
 ## 运行
 
-⚠️ **`xfer_format:=0` 是必需的**,不是可选项。
+`msg_MID360_launch.py` 的默认值已改为 `xfer_format=0`,无需再在命令行传参。
 
-驱动默认 `xfer_format:=1` 发 `livox_ros_driver2/msg/CustomMsg`,
-而 `point_lio` 订阅的是 `sensor_msgs/msg/PointCloud2`
-(`src/point_lio_ros2/src/laserMapping.cpp:781`),CustomMsg 那套代码在 point_lio 里已全部注释掉。
-ROS 2 对同名话题类型不匹配**不报错**,只会静默收不到数据 —— 表现是 IMU 初始化能到 100%,但一直没有点云。
+原因:`point_lio` 订阅的是 `sensor_msgs/msg/PointCloud2`
+(`src/point_lio_ros2/src/laserMapping.cpp:781`),只有 `xfer_format=0` 才发这个类型;
+上游默认的 `xfer_format=1` 发的是 `livox_ros_driver2/msg/CustomMsg`,
+CustomMsg 那套代码在 point_lio 里已全部注释掉。ROS 2 对同名话题类型不匹配**不报错**,
+只会静默收不到数据 —— 表现是 IMU 初始化能到 100%,但一直没有点云(此坑已踩过)。
 
 ```bash
 # 终端 1 —— 驱动
 source ~/Projects/ros_ws/install/setup.zsh
-ros2 launch livox_ros_driver2 msg_MID360_launch.py xfer_format:=0
+ros2 launch livox_ros_driver2 msg_MID360_launch.py
 
 # 终端 2 —— 建图
 source ~/Projects/ros_ws/install/setup.zsh
@@ -62,7 +63,7 @@ ros2 launch point_lio mapping_mid360.launch.py rviz:=false
 
 | 话题 | 类型 | 频率 |
 |---|---|---|
-| `/livox/lidar` | `sensor_msgs/PointCloud2` | 10 Hz (需 `xfer_format:=0`) |
+| `/livox/lidar` | `sensor_msgs/PointCloud2` | 10 Hz (`xfer_format=0`,已是默认值) |
 | `/livox/imu` | `sensor_msgs/Imu` | 200 Hz |
 | `/cloud_registered` | `sensor_msgs/PointCloud2` | 10 Hz |
 | `/aft_mapped_to_init` | `nav_msgs/Odometry` | 里程计(**不叫 `/Odometry`**) |
@@ -85,7 +86,9 @@ ros2 launch point_lio mapping_mid360.launch.py rviz:=false
 - `CMakeLists.txt` —— 删除 ROS 1 分支改为 ROS 2 专用;增加 `CMP0144` 策略处理消除
   Ubuntu 24.04 / Jazzy 上的警告;`DISTRO_ROS` 未传参时回退到 `$ROS_DISTRO` 环境变量。
 - `launch_ROS2/msg_MID360_launch.py` —— 原本所有参数是模块级常量、无法命令行覆盖;
-  改为全部 `DeclareLaunchArgument`,使 `xfer_format:=0` 等可在命令行传入。
+  改为全部 `DeclareLaunchArgument`,可在命令行传入;并把 `xfer_format` 默认值
+  由上游的 `1`(CustomMsg)改为 `0`(PointCloud2),与 point_lio 的订阅类型对齐,
+  避免默认配置下静默无点云。
 - `src/comm/pub_handler.cpp` —— 删除 1 行。
 - `config/MID360_config.json` —— 雷达 IP 改为 `192.168.1.179`。
 - `package.xml` —— 上游不跟踪(由 `build.sh` 从 `package_ROS2.xml` 生成);

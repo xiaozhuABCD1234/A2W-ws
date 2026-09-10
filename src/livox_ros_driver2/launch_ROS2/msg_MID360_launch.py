@@ -9,9 +9,11 @@ import launch
 ################### user configure parameters for ros2 start ###################
 # 以下变量为命令行参数的默认值，可通过命令行覆盖，例如：
 #   ros2 launch livox_ros_driver2 msg_MID360_launch.py \
-#       xfer_format:=0 publish_freq:=20.0 frame_id:=livox_2 \
+#       publish_freq:=20.0 frame_id:=livox_2 \
 #       user_config_path:=/path/to/your_config.json
-xfer_format   = 1    # 0-Pointcloud2(PointXYZRTL), 1-customized pointcloud format
+# xfer_format 默认 0 —— point_lio 订阅的是 sensor_msgs/PointCloud2，
+# 只有 xfer_format=0 才发这个类型；要发 CustomMsg 请显式传 xfer_format:=1。
+xfer_format   = 0    # 0-Pointcloud2(PointXYZRTL), 1-customized pointcloud format
 multi_topic   = 0    # 0-All LiDARs share the same topic, 1-One LiDAR one topic
 data_src      = 0    # 0-lidar, others-Invalid data src
 publish_freq  = 10.0 # freqency of publish, 5.0, 10.0, 20.0, 50.0, etc.
