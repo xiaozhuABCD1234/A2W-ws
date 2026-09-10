@@ -77,6 +77,10 @@ ros2 launch mid360_bringup mid360.launch.py
 `octomap_mid360.launch.py` 那层做。想手动分部启动或单独调参,
 照下面三终端的方式。
 
+> 若上一轮是 Ctrl-C 退出的,启动前先 `bash src/mid360_bringup/scripts/cleanup.sh`
+> 清残留进程,否则可能报 tell `Frame [camera_init] does not exist`(原因见
+> 「已知注意事项」)。
+
 ### 话题
 
 | 话题 | 类型 | 频率 |
