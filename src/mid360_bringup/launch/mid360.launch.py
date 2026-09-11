@@ -88,7 +88,7 @@ def generate_launch_description():
         'pcd_save', default_value='',
         description='是否把建图点云落盘(先验地图用)。留空 = 用 point_lio 的 yaml '
                     '(现为 true);显式 true/false 才覆盖。注意:只在节点【正常退出】'
-                    '(Ctrl+C)时写一次,写到 src/point_lio_ros2/PCD/scans.pcd')
+                    '(Ctrl+C)时写一次,写到 ./PCD/scans.pcd(相对运行本 launch 的目录)')
 
     driver = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([

@@ -15,10 +15,9 @@ log/
 
 # ============================================================
 #  point_lio 运行时产物
-#  ROOT_DIR = src/point_lio_ros2/
 #  程序每次启动会清零覆写 Log/*.txt;PCD/ 在 pcd_save_en:=true 时生成
-#  注意: PCD/ 目录本身不能忽略 —— 上游用 PCD/temp.txt 占位
-#        因为 PCL 的 savePCDFileBinary 不会自建目录,少了它会存盘失败
+#  注意(LOCAL PATCH P8):PCD/ 已改成**相对运行 launch 的目录**,不再固定
+#        在 src/point_lio_ros2/ 下;目录不存在时节点自己 mkdir,建不了会打印告警
 # ============================================================
 src/point_lio_ros2/Log/pos_log.txt
 src/point_lio_ros2/Log/mat_out.txt

@@ -74,7 +74,7 @@ def generate_launch_description():
         'pcd_save', default_value='',
         description='是否把建图点云落盘。留空 = 用 config/mid360.yaml 的 pcd_save.pcd_save_en;'
                     '显式传 true/false 才覆盖。注意:只在节点【正常退出】(Ctrl+C)时写一次,'
-                    '写到 src/point_lio_ros2/PCD/scans.pcd(ROOT_DIR 是编译期源码目录)')
+                    '写到 ./PCD/scans.pcd(相对运行本 launch 的目录,P8)')
 
     # Conditional RViz node launch
     rviz_node = Node(

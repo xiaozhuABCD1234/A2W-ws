@@ -1,5 +1,8 @@
 #include <omp.h>
 #include <mutex>
+#include <cerrno>
+#include <cstring>
+#include <sys/stat.h>
 #include <cmath>
 #include <thread>
 #include <fstream>
@@ -565,9 +568,12 @@ void publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>:
         scan_wait_num++;
         if (pcl_wait_save->size() > 0 && pcd_save_interval > 0 && scan_wait_num >= pcd_save_interval) {
             pcd_index++;
-            string all_points_dir(string(string(ROOT_DIR) + "PCD/scans_") + to_string(pcd_index) + string(".pcd"));
+            // LOCAL PATCH P8(见 docs/PATCHES.md):不用绝对路径。
+            // 上游是 ROOT_DIR + "PCD/" —— ROOT_DIR 是编译期烧死的源码绝对路径;
+            // 现在相对【运行 ros2 launch 的目录】,目录由 main() 启动时 mkdir。
+            string all_points_dir("PCD/scans_" + to_string(pcd_index) + ".pcd");
             pcl::PCDWriter pcd_writer;
-            cout << "current scan saved to /PCD/" << all_points_dir << endl;
+            cout << "current scan saved to " << all_points_dir << endl;
             pcd_writer.writeBinary(all_points_dir, *pcl_wait_save);
             pcl_wait_save->clear();
             scan_wait_num = 0;
@@ -759,6 +765,12 @@ int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
     auto nh = std::make_shared<rclcpp::Node>("laserMapping");
     readParameters(nh);
+    // LOCAL PATCH P8(见 docs/PATCHES.md):落盘目录改成相对路径后,目录得有人建 ——
+    // PCL 的 savePCDFileBinary 不会自建目录(上游靠 src/.../PCD/temp.txt 占位,
+    // 相对路径下那个占位文件不起作用)。已存在时 mkdir 返回 EEXIST,不是错。
+    if (pcd_save_en && mkdir("PCD", 0755) != 0 && errno != EEXIST) {
+        cout << "[pcd_save] mkdir PCD 失败(" << strerror(errno) << "),退出时会写盘失败" << endl;
+    }
     cout << "lidar_type: " << lidar_type << endl;
 
     path.header.stamp = get_ros_time(lidar_end_time);
@@ -1357,7 +1369,8 @@ int main(int argc, char **argv) {
        2. noted that pcd save will influence the real-time performences **/
     if (pcl_wait_save->size() > 0 && pcd_save_en) {
         string file_name = string("scans.pcd");
-        string all_points_dir(string(string(ROOT_DIR) + "PCD/") + file_name);
+        // LOCAL PATCH P8:同 :568,相对启动目录,不是 ROOT_DIR 绝对路径
+        string all_points_dir(string("PCD/") + file_name);
         pcl::PCDWriter pcd_writer;
         pcd_writer.writeBinary(all_points_dir, *pcl_wait_save);
     }

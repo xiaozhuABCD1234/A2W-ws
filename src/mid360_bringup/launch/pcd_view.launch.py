@@ -22,17 +22,15 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import (
-    EnvironmentVariable,
     LaunchConfiguration,
     PathJoinSubstitution,
 )
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
-DEFAULT_PCD = PathJoinSubstitution([
-    EnvironmentVariable('HOME'),
-    'Projects/ros_ws/src/point_lio_ros2/PCD/scans.pcd',
-])
+# point_lio 已改成相对路径落盘(P8):就是运行 launch 目录下的 PCD/scans.pcd。
+# 在同目录启动就能直接看到:cd ~/Projects/ros_ws && ros2 launch mid360_bringup pcd_view.launch.py
+DEFAULT_PCD = './PCD/scans.pcd'
 
 
 def generate_launch_description():

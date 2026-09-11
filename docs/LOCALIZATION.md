@@ -82,8 +82,8 @@
 
 ```bash
 # ① 先验点云:改 config/mid360.yaml 的 pcd_save.pcd_save_en: true
-#    下次建图 Ctrl+C 退出时写: src/point_lio_ros2/PCD/scans.pcd
-#    (ROOT_DIR 是编译期烧进二进制的【源码】目录,不是 install/)
+#    下次建图 Ctrl+C 退出时写: 运行 ros2 launch 的目录下的 PCD/scans.pcd
+#    (已改成相对路径,P8;目录不存在时节点自己 mkdir)
 #    注:全分辨率原始点云要重新走一次建图才拿得到,这是唯一"必须重做"的一步。
 
 # ② 2D 占据栅格:直接由运行中的 octomap_server 导出
@@ -290,7 +290,7 @@ vendored 代码只允许最小就地补丁。
 | 3 | MID-360 launch 吃 `/cloud_registered_body` | 覆盖 `cloud_topic` 后看 `alignment_status` | fitness 正常收敛,不报 "no points" |
 | 4 | `/projected_map` 导出的 2D 栅格质量 | 开 rviz 叠 `map2d.pgm` 与实际比对 | 墙线不糊、门洞保留、无整片空洞 |
 | 5 | AMCL 路线的 TF 衔接 | `ros2 run tf2_tools view_frames` | 全链唯一:`map→camera_init→body`,无重复发布者 |
-| 6 | `scans.pcd` 体积/内存 | `ls -lh src/point_lio_ros2/PCD/` | 能一次性载入(本机空闲约 11 GiB);长测改 `pcd_save.interval` |
+| 6 | `scans.pcd` 体积/内存 | `ls -lh ./PCD/`(在哪个目录启动的就在哪里) | 能一次性载入(本机空闲约 11 GiB);长测改 `pcd_save.interval` |
 | 7 | 盲启动成功率(验收基线) | 同一先验下,搬动/重启 3 次做 top-1 命中统计 | ≥ 2/3 命中且误差 < 0.5 m;不达标先查 §6.3 歧义 |
 
 ---

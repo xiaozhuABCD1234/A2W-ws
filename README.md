@@ -254,5 +254,8 @@ git --git-dir=~/ros_ws-upstream-git/point_lio_ros2.git log --oneline
 - `src/point_lio_ros2/Log/{pos_log,mat_out,imu_pbp}.txt` 是运行时被清零覆写的产物,已忽略。
 - `src/point_lio_ros2/include/IKFoM/` 下 3 个 `.vscode/settings.json`(上游跟踪的 IDE 配置)
   被本仓库的 `.vscode/` 全局规则排除,不影响编译。
-- `src/point_lio_ros2/PCD/temp.txt` **必须保留**。PCL 的 `savePCDFileBinary` 不会自动创建
-  目录,`pcd_save_en:=true` 时缺了 `PCD/` 目录会存盘失败;上游用这个空文件占位。
+- `src/point_lio_ros2/PCD/temp.txt` 是上游用来占位的空文件(PCL 的 `savePCDFileBinary`
+  不自建目录)。**LOCAL PATCH P8 之后落盘改成相对路径**:目录是**运行 `ros2 launch` 的那个
+  目录**下的 `PCD/`(通常是本工作空间根目录),不是 `src/point_lio_ros2/PCD/`。
+  那个占位文件在新位置已无用 —— 新目录由节点启动时自己 `mkdir`(已在就不动,
+  建不了会打印 `[pcd_save] mkdir PCD 失败(...)`)。
