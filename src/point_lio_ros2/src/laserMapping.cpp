@@ -575,6 +575,10 @@ void publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>:
     }
 }
 
+// ─── LOCAL PATCH P4(见 docs/PATCHES.md)─────────────────────────────────
+// 机体系点云的 deskew(运动补偿)开关。置 false 可复现官方行为,用于 A/B 对比。
+static const bool kDeskewBodyCloud = true;
+
 void publish_frame_body(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pubLaserCloudFull_body) {
 
     if (odom_only) {return;}
@@ -582,9 +586,51 @@ void publish_frame_body(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::
     int size = feats_undistort->points.size();
     PointCloudXYZI::Ptr laserCloudIMUBody(new PointCloudXYZI(size, 1));
 
+    // LOCAL PATCH P4:把每个点从它自己的采样时刻换算到帧尾时刻(lidar_end_time)的机体系。
+    //
+    // 为什么必须做:feats_undistort 是**未补偿**的原始回波(上方 ImuProcess::Process
+    // 只做拷贝,变量名是历史残留),而下面 header.stamp 只给了一个时戳
+    // lidar_end_time —— octomap_server 会按这一时戳查一次 TF,把所有点都当成
+    // 同一瞬间测得的。旋转时每个点因此错位 ω·(t_ref − t_i),一帧最坏
+    // ω×100 ms(90°/s ≈ 9°;3 m 处约 47 cm 的扇面)= 旋转重影的结构性来源,
+    // 调 octomap 参数最多只能把它糊掉。
+    // 世界系点云不缺口:逐点循环里已按各点时刻做过 pointBodyToWorld。
+    // 数学(机体系、右乘约定 dR/dt = R·[ω]×):
+    //   p_ref = R(t_ref)^T·(R(t_i)·p_i + pos(t_i) − pos(t_ref))
+    //         ≈ Exp(−Δt·ω)·p_i − Δt·v_body,  Δt = t_ref − t_i ≥ 0
+    // 其中 state 里的 vel 是**世界系**(见 get_f_input: res(pos)=vel 不转系),
+    // 所以要用 R^T 转回机体系;ω 则由 gyro−bg(输入态)或估计值 x_.omg(输出态)给出。
+    const bool deskew = kDeskewBodyCloud && imu_en && size > 0;
+    const double t_ref = lidar_end_time;
+    V3D omg_body = V3D::Zero();  // 机体系角速度 [rad/s]
+    V3D vel_body = V3D::Zero();  // 机体系线速度 [m/s]
+    if (deskew) {
+        if (!use_imu_as_input) {
+            omg_body = kf_output.x_.omg;   // 已经是去偏后的真实角速度(量测方程: gyro−omg−bg=0)
+            vel_body = kf_output.x_.rot.normalized().conjugate() * kf_output.x_.vel;
+        } else {
+            omg_body = angvel_avr - kf_input.x_.bg;  // 输入态的 x_ 里没有 omg,用最近一次陀螺去偏
+            vel_body = kf_input.x_.rot.normalized().conjugate() * kf_input.x_.vel;
+        }
+    }
+
     for (int i = 0; i < size; i++) {
         pointBodyLidarToIMU(&feats_undistort->points[i], \
                             &laserCloudIMUBody->points[i]);
+        if (!deskew) continue;
+
+        // curvature 单位 ms,是相对帧首的时刻;加 lidar_beg_time 得绝对时刻
+        const double t_i = feats_undistort->points[i].curvature / 1000.0 + Measures.lidar_beg_time;
+        const double dt = t_ref - t_i;              // 该点比帧尾早多少秒(≥0)
+        if (dt <= 1e-6 || dt > 0.2) continue;       // 时间戳异常的点不补偿(dt>0.2s 视为坏值)
+
+        const V3D p(laserCloudIMUBody->points[i].x,
+                    laserCloudIMUBody->points[i].y,
+                    laserCloudIMUBody->points[i].z);
+        const V3D p_ref = Exp(omg_body, -dt) * p - dt * vel_body;
+        laserCloudIMUBody->points[i].x = p_ref(0);
+        laserCloudIMUBody->points[i].y = p_ref(1);
+        laserCloudIMUBody->points[i].z = p_ref(2);
     }
 
     sensor_msgs::msg::PointCloud2 laserCloudmsg;

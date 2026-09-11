@@ -17,10 +17,12 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>rviz2</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
 
   <!-- 被集成的节点 -->
   <exec_depend>point_lio</exec_depend>
   <exec_depend>livox_ros_driver2</exec_depend>
+  <exec_depend>pcl_ros</exec_depend>
   <exec_depend>octomap_server</exec_depend>
   <exec_depend>octomap_msgs</exec_depend>
   <exec_depend>octomap_rviz_plugins</exec_depend>

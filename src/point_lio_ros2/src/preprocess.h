@@ -119,6 +119,11 @@ namespace ouster_ros {
     };
 }  // namespace ouster_ros
 
+// ─── LOCAL PATCH P1(见 docs/PATCHES.md)─────────────────────────────────
+// 上游 dfloreaa/point_lio_ros2 没有 livox 分支:switch(lidar_type) 里只有
+// OUST64 / VELO16 / HESAIxt32 / UNILIDAR,avia_handler 整段被注释。
+// 下面这块是本地补的 MID-360(PointCloud2,xfer_format:=0)支持。
+// 同步上游后请确认此块仍在,否则会静默收不到点云。
 namespace livox_ros {
     struct EIGEN_ALIGN16 Point {
         PCL_ADD_POINT4D;
@@ -182,6 +187,7 @@ public:
 private:
     // void avia_handler(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg);
 
+    // LOCAL PATCH P1(见 docs/PATCHES.md):实现见下方同名函数
     // Livox (Mid-360 / Avia...) pointcloud2, published with xfer_format:=0
     void livox_handler(const sensor_msgs::msg::PointCloud2::SharedPtr &msg);
 

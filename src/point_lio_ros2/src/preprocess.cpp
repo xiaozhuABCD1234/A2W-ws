@@ -63,6 +63,7 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::SharedPtr &msg, Po
     }
 
     switch (lidar_type) {
+        // LOCAL PATCH P1(见 docs/PATCHES.md):上游此处无 AVIA 分支
         case AVIA:
             livox_handler(msg);
             break;
@@ -133,6 +134,12 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::SharedPtr &msg, Po
 
 // }
 
+// ─── LOCAL PATCH P1(见 docs/PATCHES.md)─────────────────────────────────
+// 上游无此函数。作用是把每个点的**绝对 ns 时间**折成 point_lio 内部用的
+// curvature(ms,相对帧首)—— 即官方 ROS1 avia_handler 的等价入口,没有它
+// laserMapping 的逐点时间补偿就无从谈起。
+// 时间基准已核对:header.stamp == 帧首点时间
+//(lddc.cpp:310/316 + pub_handler.cpp:281 GetLidarBaseTime)。
 void Preprocess::livox_handler(const sensor_msgs::msg::PointCloud2::SharedPtr &msg) {
     pl_surf.clear();
     pl_corn.clear();

@@ -11,7 +11,9 @@ import launch
 #   ros2 launch livox_ros_driver2 msg_MID360_launch.py \
 #       publish_freq:=20.0 frame_id:=livox_2 \
 #       user_config_path:=/path/to/your_config.json
-# xfer_format 默认 0 —— point_lio 订阅的是 sensor_msgs/PointCloud2，
+# LOCAL PATCH P3(见 docs/PATCHES.md):上游默认 1(CustomMsg)。
+# P1 补的是 PointCloud2 通路,默认必须为 0,否则 point_lio 静默收不到点云。
+# xfer_format 默认 0 —— point_lio 订阅的是 sensor_msgs/PointCloud2,
 # 只有 xfer_format=0 才发这个类型；要发 CustomMsg 请显式传 xfer_format:=1。
 xfer_format   = 0    # 0-Pointcloud2(PointXYZRTL), 1-customized pointcloud format
 multi_topic   = 0    # 0-All LiDARs share the same topic, 1-One LiDAR one topic

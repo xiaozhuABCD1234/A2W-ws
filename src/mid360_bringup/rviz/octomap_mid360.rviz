@@ -55,11 +55,32 @@ Visualization Manager:
       Color: 255; 80; 80
       Buffer Length: 1
 
-    # octomap 体素中心点云(替代 rviz 插件:本机 octomap_rviz_plugins 2.1.0 与
-    # liboctomap 1.9.7 ABI 不兼容,Octomap/OccupancyGrid display 加载会报
-    # undefined symbol OcTreeStamped。等装了匹配版本后再换回插件显示。)
+    # octomap 着色:octomap_rviz_plugins 的 OccupancyGrid(subscribes /octomap_binary)。
+    # 之前退化成 FlatColor 橙色点云,是因为插件 .so 的 DT_NEEDED 里缺 liboctomap,
+    # rviz2(自己不加载 octomap)dlopen 时报 undefined symbol OcTreeStamped。实测预加载
+    # liboctomap.so.1.9.7 插件符号全部可解析 —— 已由 launch 里 rviz2 的
+    # LD_PRELOAD 解决。
+    # Voxel Coloring 三选一(插件源码 occupancy_grid_display.cpp):
+    #   Z-Axis          —— 按高度彩虹色(h=(1-z归一)*0.8,顶红底紫,与 octomap_server
+    #                      marker 同款),层次最清楚,默认选它;
+    #   Cell Probability —— setColor(1-p, p, 0):p→1 绿、p→0 红、0.5 暗黄。
+    #                      注意与本仓库其它显示相反(占据=绿);且 hit/max 参数下
+    #                      占据体素概率几乎都顶到 0.95 → 一片均匀亮绿。
+    #   Cell Color      —— 普通 OcTree 无效(报 Cannot extract color),只有 ColorOcTree 能用。
+    # Voxel Rendering: Occupied Voxels(只画占据)/ Free Voxels / All Voxels(加空闲,量大)。
+    - Class: octomap_rviz_plugins/OccupancyGrid
+      Name: OctomapGrid
+      Enabled: false
+      Topic:
+        Value: /octomap_binary
+      Voxel Rendering: Occupied Voxels
+      Voxel Coloring: Z-Axis
+      Voxel Alpha: 0.9
+      Max. Octree Depth: 16
+
+    # 备用:体素中心点云(FlatColor 橙色)。仅当插件仍加载失败时再启用。
     - Class: rviz_default_plugins/PointCloud2
-      Name: Octomap
+      Name: Octomap_fallback_points
       Enabled: true
       Topic:
         Value: /octomap_point_cloud_centers

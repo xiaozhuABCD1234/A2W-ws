@@ -7,7 +7,9 @@ find_package(ament_cmake REQUIRED)
 install(DIRECTORY launch config rviz
   DESTINATION share/${PROJECT_NAME}
 )
-install(PROGRAMS scripts/cleanup.sh
+install(PROGRAMS
+  scripts/cleanup.sh
+  scripts/preflight.sh
   DESTINATION lib/${PROJECT_NAME}
 )
 
