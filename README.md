@@ -254,8 +254,8 @@ map --(backend, 20 Hz 纠偏)--> camera_init --(point_lio)--> body
 | 优化 | Ceres 6-DOF 位姿图（Huber + 残差门控剔外点） |
 | 纠偏 | `T_map_camera_init = T_map_body · (T_camera_init_body)⁻¹`，一阶平滑 1.5 s |
 | 输出 | `/backend/path`、`/backend/odom`、`/backend/map_points`、`/backend/loop_markers`、`/backend/status`、TF `map→camera_init` |
-| 实测（合成回放，2 圈 7×7 m，注入 5% 尺度 + 0.5°/m 漂移） | ATE 1.245 m → **0.317 m**（↓74.5%），末点 2.44 m → **0.060 m**；检测 p50 28 ms；CPU 均值 17% 单核 |
-| 实测（直线 8 m，同样漂移） | 回环 0 次（无误检），轨迹不动 |
+| 实测（合成回放，生产默认参数，2 圈 7×7 m，注入 5% 尺度 + 0.5°/m 漂移） | 40 条回环；ATE 1.263 m → **0.358 m**（↓71.6%），末点 2.44 m → **0.065 m**；CPU 均值 2.7%、峰值 21.8% 单核；零丢帧 |
+| 实测（直线 8 m，同样漂移） | 回环 0 次（无误检），轨迹完全不动 |
 
 验收细节见 [`docs/BACKEND_ACCEPTANCE.md`](docs/BACKEND_ACCEPTANCE.md)。
 

@@ -449,6 +449,10 @@ class BackendNode : public rclcpp::Node {
         last_smooth_stamp_ = -1.0;
         last_solve_ms_ = 0.0;
         last_fitness_ = 0.0;
+        map_accum_.reset();
+        map_keyframes_applied_ = 0;
+        map_dirty_ = false;
+        last_rebuild_correction_.setIdentity();
       }
       RCLCPP_WARN(get_logger(), "backend reset: graph/keyframes cleared, re-anchoring");
       publishPath();
@@ -576,8 +580,20 @@ class BackendNode : public rclcpp::Node {
                   keyframes_.size(), loops_.size(), last_solve_ms_);
       publishPath();
       publishLoopMarkers();
-      publishMapPoints();
-      last_map_publish_ = std::chrono::steady_clock::now();
+      // 回环常成串到达（连续几个关键帧各触发一次优化），且每条新回环对历史位姿的
+      // 修正量通常越来越小。整图重建是 O(全部关键帧)（实测 100~1400 ms，会阻塞 worker），
+      // 所以只有纠偏量真的变了才置脏，再由 map_publish_period 节流重建。
+      {
+        std::lock_guard<std::mutex> lock(state_mutex_);
+        const Eigen::Isometry3d delta = correction_ * last_rebuild_correction_.inverse();
+        const double dt = delta.translation().norm();
+        const double da = Eigen::AngleAxisd(delta.linear()).angle();
+        if (dt > 0.03 || da > 0.3 * M_PI / 180.0) {
+          map_dirty_ = true;
+          last_rebuild_correction_ = correction_;
+        }
+      }
+      publishMapPointsIfDue(false);
     } catch (const std::exception& e) {
       RCLCPP_ERROR(get_logger(), "optimization exception: %s", e.what());
     }
@@ -662,51 +678,81 @@ class BackendNode : public rclcpp::Node {
         return;
       }
     }
-    publishMapPoints();
+    publishMapPoints(map_dirty_);
+    map_dirty_ = false;
     last_map_publish_ = now_tp;
   }
 
-  void publishMapPoints() {
-    // 只在 worker 线程调用；keyframes_ 的写者也是 worker，读安全。
-    PointCloudT::Ptr merged(new PointCloudT());
-    double last_stamp = 0.0;
-    int64_t last_stamp_ns = 0;
-    size_t index = 0;
-    for (const auto& kf : keyframes_) {
+  // 把 keyframes_[from, end) 的点按 pose_opt 变到 map 系后追加到 out。
+  void appendKeyframesToMap(size_t from, PointCloudT* out) const {
+    for (size_t i = from; i < keyframes_.size(); ++i) {
+      const Keyframe& kf = keyframes_[i];
       if (!kf.cloud) {
         continue;
       }
-      last_stamp = kf.stamp;
-      if (index < keyframe_stamp_ns_.size() && keyframe_stamp_ns_[index] > 0) {
-        last_stamp_ns = keyframe_stamp_ns_[index];
-      }
-      ++index;
       const Eigen::Isometry3d& T = kf.pose_opt;
       const Eigen::Matrix3d R = T.linear();
       const Eigen::Vector3d t = T.translation();
-      merged->reserve(merged->size() + kf.cloud->size());
+      out->reserve(out->size() + kf.cloud->size());
       for (const auto& p : kf.cloud->points) {
         if (!std::isfinite(p.x) || !std::isfinite(p.y) || !std::isfinite(p.z)) {
           continue;
         }
         const Eigen::Vector3d q = R * Eigen::Vector3d(p.x, p.y, p.z) + t;
-        PointT out = p;
-        out.x = static_cast<float>(q.x());
-        out.y = static_cast<float>(q.y());
-        out.z = static_cast<float>(q.z());
-        merged->push_back(out);
+        PointT pt = p;
+        pt.x = static_cast<float>(q.x());
+        pt.y = static_cast<float>(q.y());
+        pt.z = static_cast<float>(q.z());
+        out->push_back(pt);
       }
     }
+  }
 
-    if (params_.output.map_voxel > 0.0 && !merged->empty()) {
-      PointCloudT::Ptr filtered(new PointCloudT());
-      pcl::VoxelGrid<PointT> voxel;
-      voxel.setLeafSize(static_cast<float>(params_.output.map_voxel),
-                        static_cast<float>(params_.output.map_voxel),
-                        static_cast<float>(params_.output.map_voxel));
-      voxel.setInputCloud(merged);
-      voxel.filter(*filtered);
-      merged.swap(filtered);
+  PointCloudT::Ptr voxelize(const PointCloudT::Ptr& in) const {
+    if (params_.output.map_voxel <= 0.0 || in->empty()) {
+      return in;
+    }
+    PointCloudT::Ptr filtered(new PointCloudT());
+    pcl::VoxelGrid<PointT> voxel;
+    const float leaf = static_cast<float>(params_.output.map_voxel);
+    voxel.setLeafSize(leaf, leaf, leaf);
+    voxel.setInputCloud(in);
+    voxel.filter(*filtered);
+    return filtered;
+  }
+
+  // 地图点云是增量维护的：每来一个关键帧只把"新增的那几帧"变换+体素化后并进
+  // map_accum_，而不是每次重建全图。全量重建只在回环优化改变了历史位姿之后做。
+  // 否则长时建图会退化成 O(关键帧数) 的重复变换（2000 帧 × 5k 点/2 s 就能吃满一个核）。
+  void publishMapPoints(bool rebuild_all = false) {
+    // 只在 worker 线程调用；keyframes_ 的写者也是 worker，读安全。
+    if (rebuild_all || !map_accum_ ||
+        map_keyframes_applied_ > keyframes_.size()) {
+      map_accum_.reset(new PointCloudT());
+      map_keyframes_applied_ = 0;
+      appendKeyframesToMap(0, map_accum_.get());
+      map_accum_ = voxelize(map_accum_);
+      map_keyframes_applied_ = keyframes_.size();
+    } else if (map_keyframes_applied_ < keyframes_.size()) {
+      PointCloudT::Ptr fresh(new PointCloudT());
+      appendKeyframesToMap(map_keyframes_applied_, fresh.get());
+      fresh = voxelize(fresh);
+      *map_accum_ += *fresh;
+      map_keyframes_applied_ = keyframes_.size();
+      // 增量合并会让重叠区域的点重复累积；超过阈值时整体压一次，保持内存与带宽有界。
+      if (map_accum_->size() > kMapCompressThreshold) {
+        map_accum_ = voxelize(map_accum_);
+      }
+    }
+    PointCloudT::Ptr merged = map_accum_ ? map_accum_ : PointCloudT::Ptr(new PointCloudT());
+
+    double last_stamp = 0.0;
+    int64_t last_stamp_ns = 0;
+    if (!keyframes_.empty()) {
+      last_stamp = keyframes_.back().stamp;
+      if (!keyframe_stamp_ns_.empty() && keyframe_stamp_ns_.back() > 0) {
+        last_stamp_ns = keyframe_stamp_ns_.back();
+      }
     }
 
     sensor_msgs::msg::PointCloud2 msg;
@@ -912,6 +958,7 @@ class BackendNode : public rclcpp::Node {
 
   // ── 成员 ────────────────────────────────────────────────────────────────
   static constexpr size_t kMaxOdomBuffer = 200;
+  static constexpr size_t kMapCompressThreshold = 1'500'000;  // 增量合并后超过就整体压一次
 
   BackendParams params_;
   size_t max_queue_ = 2;
@@ -963,6 +1010,10 @@ class BackendNode : public rclcpp::Node {
   double last_solve_ms_ = 0.0;
   double last_fitness_ = 0.0;
   std::chrono::steady_clock::time_point last_map_publish_{};
+  PointCloudT::Ptr map_accum_;          // map 系增量累积点云（worker 线程独占）
+  size_t map_keyframes_applied_ = 0;    // map_accum_ 已并入到第几个关键帧
+  bool map_dirty_ = false;              // 历史位姿被优化改过，下次发布需全量重建
+  Eigen::Isometry3d last_rebuild_correction_ = Eigen::Isometry3d::Identity();
 };
 
 }  // namespace point_lio_backend
