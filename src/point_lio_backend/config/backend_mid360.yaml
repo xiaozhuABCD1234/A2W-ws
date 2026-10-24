@@ -22,9 +22,14 @@
     keyframe.max_keyframes: 2000
 
     # ── Scan Context ──────────────────────────────────────────────────────
+    # Mid-360 是 360°×(-7°~52°) 雷达，SC 的扇区本来就覆盖完整 2π，旋转不变性
+    # 正是靠"360° + 扇区循环移位"成立，所以不要为它加 FOV mask。
+    # 真正按 Mid-360 调的是半径：10 Hz 约 1.9 万点/帧，40 m 外环 bin 太稀；
+    # 室内/园区 30 m 足够（octomap 也只用 15 m），需要远距离再调大。
+    # rings×sectors = 20×60 -> 环宽 1.5 m、扇区 6°，与 SC 论文一致。
     scan_context.rings: 20
     scan_context.sectors: 60
-    scan_context.max_radius: 40.0
+    scan_context.max_radius: 30.0
     scan_context.ring_key_threshold: 0.15
     scan_context.sc_distance_threshold: 0.35
     scan_context.top_candidates: 5
@@ -45,7 +50,10 @@
     graph.odom_rot_sigma_deg: 0.5
     graph.loop_trans_sigma: 0.10
     graph.loop_rot_sigma_deg: 1.5
-    graph.huber_delta: 1.0
+    # 注意量纲：残差已按 1/σ 加权（平移 1/0.10 = ×10 每米），Huber δ 也在
+    # 加权单位里。δ=1 会把 >0.1 m 的回环当外点线性降权，单条回环几乎拉不回来；
+    # 10 对应 ~1 m 内保持二次、之外线性，配合优化后的残差门控剔外点。
+    graph.huber_delta: 10.0
     graph.max_iterations: 50
     graph.num_threads: 2
     graph.max_loop_residual_trans: 0.5

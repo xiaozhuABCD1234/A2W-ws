@@ -183,10 +183,7 @@ class Harness(Node):
         self.loop_count = 0
         self.create_subscription(Path, '/backend/path', self._on_path, qos)
         self.create_subscription(DiagnosticArray, '/backend/status', self._on_status, qos)
-        latched = QoSProfile(depth=1,
-                             reliability=QoSReliabilityPolicy.RELIABLE,
-                             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
-        self.create_subscription(DiagnosticArray, '/backend/status', self._on_status, latched)
+
 
     def _on_path(self, msg):
         self.path = msg
@@ -326,12 +323,14 @@ def main():
     parser.add_argument('--pcd', default=None)
     parser.add_argument('--backend-params', default=None)
     parser.add_argument('--speed', type=float, default=1.2)
+    parser.add_argument('--laps', type=int, default=1,
+                        help='loop 模式下绕几圈（2 圈会产生多条回环，测试更充分）')
     parser.add_argument('--loop-size', type=float, default=7.0)
     parser.add_argument('--center-x', type=float, default=-6.5)
     parser.add_argument('--center-y', type=float, default=-4.0)
     parser.add_argument('--straight-length', type=float, default=8.0)
-    parser.add_argument('--range-m', type=float, default=15.0)
-    parser.add_argument('--max-points', type=int, default=4000)
+    parser.add_argument('--range-m', type=float, default=12.0)
+    parser.add_argument('--max-points', type=int, default=3000)
     parser.add_argument('--keep-backend', action='store_true')
     parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
@@ -368,11 +367,19 @@ def main():
     xyz = xyz[mask]
     print(f'[replay] PCD points(|z|<3)={len(xyz)}')
 
-    gt = (generate_loop_path(args.center_x, args.center_y, args.loop_size,
-                             args.speed, 0.1)
-          if args.mode == 'loop'
-          else generate_straight_path(args.center_x, args.center_y, args.straight_length,
-                                      args.speed, 0.1))
+    if args.mode == 'loop':
+        one_lap = generate_loop_path(args.center_x, args.center_y, args.loop_size,
+                                     args.speed, 0.1)
+        period = one_lap[-1][0] + 0.1
+        gt = []
+        for lap in range(max(1, args.laps)):
+            for k, (t, pose) in enumerate(one_lap):
+                if lap > 0 and k == 0:
+                    continue  # 圈接缝处与上一圈末位姿重复
+                gt.append((t + lap * period, pose))
+    else:
+        gt = generate_straight_path(args.center_x, args.center_y, args.straight_length,
+                                    args.speed, 0.1)
     gt_poses = [p for _, p in gt]
     raw_poses = distort_odometry(gt_poses)
     print(f'[replay] frames={len(gt_poses)} duration={len(gt_poses)*0.1:.1f}s')
@@ -383,6 +390,10 @@ def main():
     ext = max(np.max(np.abs([p[0, 3] - cx for p in gt_poses])),
               np.max(np.abs([p[1, 3] - cy for p in gt_poses]))) + args.range_m + 2.0
     crop = xyz[(np.abs(xyz[:, 0] - cx) < ext) & (np.abs(xyz[:, 1] - cy) < ext)]
+    if len(crop) > 1_500_000:
+        # 控制 KD-tree 查询耗时：只保留 150 万世界点（扫描每帧仍采样 3000 点）。
+        rng = np.random.default_rng(7)
+        crop = crop[rng.choice(len(crop), 1_500_000, replace=False)]
     print(f'[replay] cropped world points={len(crop)}')
 
     from scipy.spatial import cKDTree
@@ -430,12 +441,23 @@ def main():
             print('[replay] replay done, waiting for backend ...')
 
             # 等回环出现（loop 模式）或确认没有回环（straight 模式）
-            deadline = time.time() + 20.0
+            deadline = time.time() + 40.0
             while time.time() < deadline:
                 node.spin(0.2)
                 if args.mode == 'loop' and node.loop_count > 0 and node.path is not None:
                     break
-            node.spin(3.0)  # 让优化后的 path 发出来
+            # 等回环数稳定（后端消化队列后可能连续检出多条），再给优化后的 path 留时间
+            last_loops = -1
+            stable_since = time.time()
+            stable_deadline = time.time() + 20.0
+            while time.time() < stable_deadline:
+                node.spin(0.2)
+                if node.loop_count != last_loops:
+                    last_loops = node.loop_count
+                    stable_since = time.time()
+                elif node.loop_count > 0 and time.time() - stable_since > 3.0:
+                    break
+            node.spin(2.0)  # 让最后一次优化后的 path 发出来
 
         if fail_reason is None:
             if node.path is None:
