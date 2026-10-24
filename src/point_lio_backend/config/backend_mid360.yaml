@@ -1,0 +1,65 @@
+/**:
+  ros__parameters:
+    # ── 坐标系 / 话题 ─────────────────────────────────────────────────────
+    world_frame: map
+    odom_frame: camera_init
+    body_frame: body
+    odom_topic: /aft_mapped_to_init
+    cloud_topic: /cloud_registered_body
+    path_topic: /backend/path
+    odom_out_topic: /backend/odom
+    map_topic: /backend/map_points
+    loop_marker_topic: /backend/loop_markers
+    status_topic: /backend/status
+
+    # ── 关键帧 / 子图 ─────────────────────────────────────────────────────
+    keyframe.min_distance: 1.0
+    keyframe.min_rotation_deg: 10.0
+    keyframe.max_interval_sec: 2.0
+    keyframe.min_interval_sec: 0.3
+    keyframe.submap_frames: 4
+    keyframe.submap_voxel: 0.2
+    keyframe.max_keyframes: 2000
+
+    # ── Scan Context ──────────────────────────────────────────────────────
+    scan_context.rings: 20
+    scan_context.sectors: 60
+    scan_context.max_radius: 40.0
+    scan_context.ring_key_threshold: 0.15
+    scan_context.sc_distance_threshold: 0.35
+    scan_context.top_candidates: 5
+    scan_context.min_index_gap: 20
+    scan_context.min_time_gap_sec: 10.0
+
+    # ── GICP 校验 ─────────────────────────────────────────────────────────
+    icp.max_correspondence: 1.0
+    icp.max_iterations: 40
+    icp.max_fitness: 0.10
+    icp.min_inlier_ratio: 0.6
+    icp.max_correction_trans: 5.0
+    icp.max_correction_rot_deg: 30.0
+
+    # ── 位姿图 ────────────────────────────────────────────────────────────
+    graph.odom_trans_sigma: 0.02
+    graph.odom_rot_sigma_deg: 0.5
+    graph.loop_trans_sigma: 0.10
+    graph.loop_rot_sigma_deg: 1.5
+    graph.huber_delta: 1.0
+    graph.max_iterations: 50
+    graph.num_threads: 2
+    graph.max_loop_residual_trans: 0.5
+    graph.max_loop_residual_rot_deg: 5.0
+    graph.remove_outlier_loops: true
+
+    # ── 输出 ──────────────────────────────────────────────────────────────
+    output.map_publish_period: 2.0
+    output.map_voxel: 0.2
+    output.correction_tau: 1.5
+    output.publish_odom: true
+    output.publish_raw_path: false
+
+    # ── 运行时 ────────────────────────────────────────────────────────────
+    runtime.pending_clouds: 2
+    runtime.reset_on_jump_m: 2.0
+    runtime.stamp_tolerance_sec: 0.05
+    runtime.max_loop_solve_sec: 0.5
