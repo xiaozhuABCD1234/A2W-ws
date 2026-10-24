@@ -244,6 +244,9 @@ if [ -n "$WS" ]; then
     "$WS/src/mid360_driver/launch/mid360_driver.launch.py:$WS/install/mid360_driver/share/mid360_driver/launch/mid360_driver.launch.py" \
     "$WS/src/mid360_bringup/config/octomap_mid360.yaml:$WS/install/mid360_bringup/share/mid360_bringup/config/octomap_mid360.yaml" \
     "$WS/src/mid360_bringup/launch/octomap_mid360.launch.py:$WS/install/mid360_bringup/share/mid360_bringup/launch/octomap_mid360.launch.py" \
+    "$WS/src/mid360_bringup/launch/mid360.launch.py:$WS/install/mid360_bringup/share/mid360_bringup/launch/mid360.launch.py" \
+    "$WS/src/point_lio_backend/config/backend_mid360.yaml:$WS/install/point_lio_backend/share/point_lio_backend/config/backend_mid360.yaml" \
+    "$WS/src/point_lio_backend/launch/backend_mid360.launch.py:$WS/install/point_lio_backend/share/point_lio_backend/launch/backend_mid360.launch.py" \
     "$WS/src/point_lio_ros2/config/mid360.yaml:$WS/install/point_lio/share/point_lio/config/mid360.yaml" ; do
     a="${pair%%:*}"; b="${pair##*:}"
     if [ -f "$a" ] && [ -f "$b" ] && ! cmp -s "$a" "$b"; then
@@ -305,6 +308,46 @@ if [ -n "$PIO_LAUNCH" ]; then
   fi
 else
   pass "未找到 point_lio 的 mapping_mid360.launch.py,跳过"
+fi
+
+# ── C7 后端回环/位姿图(point_lio_backend) ────────────────────────────────
+head2 'C7  后端配置(point_lio_backend)'
+BEM_CFG=""
+if [ -n "$WS" ]; then
+  BEM_CFG="$(pick "$WS/src/point_lio_backend/config/backend_mid360.yaml" \
+                  "$WS/install/point_lio_backend/share/point_lio_backend/config/backend_mid360.yaml")" || true
+fi
+if [ -z "$BEM_CFG" ]; then
+  fail "找不到 point_lio_backend 的 config/backend_mid360.yaml"
+  info "确认 src/point_lio_backend 已存在并 colcon build --packages-select point_lio_backend"
+else
+  pass "point_lio_backend 配置文件存在"
+  for kv in "world_frame=map" "odom_frame=camera_init" "body_frame=body"; do
+    k="${kv%%=*}"; want="${kv##*=}"
+    got="$(yaml_get "$BEM_CFG" "$k")"
+    if [ "$got" = "$want" ]; then
+      pass "backend $k=$got"
+    else
+      fail "backend $k='${got:-空}',应为 $want"
+      info "坐标系契约见 docs/BACKEND_SPEC.md 第 1 节;错配会让 octomap/rviz 查不到 TF。"
+    fi
+  done
+fi
+if [ -n "$WS" ] && [ -f "$WS/src/mid360_bringup/launch/mid360.launch.py" ]; then
+  ML="$WS/src/mid360_bringup/launch/mid360.launch.py"
+  if grep -q "point_lio_backend" "$ML" && grep -q "'frame_id': 'map'" "$ML"; then
+    pass "一键 launch 已 include 后端,并在 backend=true 时把 octomap 切到 map 系"
+  else
+    fail "mid360.launch.py 缺少 point_lio_backend include 或 frame_id=map"
+    info "backend=true 时 octomap 必须用 map 系,否则纠偏 TF 不会被 octomap 看到。"
+  fi
+fi
+if [ -n "$WS" ]; then
+  if [ -d "$WS/install/point_lio_backend" ]; then
+    pass "point_lio_backend 已 build(install/ 存在)"
+  else
+    warn "install/point_lio_backend 不存在:backend:=true 时一键 launch 会失败,先 colcon build"
+  fi
 fi
 
 # ── R1 运行时:实际 topic 类型 ─────────────────────────────────────────────

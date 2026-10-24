@@ -4,6 +4,8 @@
     ros2 launch mid360_bringup mid360.launch.py show_rviz:=false
     ros2 launch mid360_bringup mid360.launch.py pcd_save:=true      # 临时开 PCD 落盘(先验地图)
     ros2 launch mid360_bringup mid360.launch.py pcd_save:=false     # 建图时不落盘(省内存/CPU)
+    ros2 launch mid360_bringup mid360.launch.py backend:=false      # 关后端回环/位姿图
+                                                                    # (octomap 退回 camera_init 系)
 
 point_lio 的 rviz 固定关掉;rviz 由本 launch 直接起。
 
@@ -34,7 +36,7 @@ import subprocess
 
 from ament_index_python.packages import get_package_prefix
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -95,6 +97,11 @@ def generate_launch_description():
                     '(现为 true);显式 true/false 才覆盖。注意:只在节点【正常退出】'
                     '(Ctrl+C)时写一次,写到 ./PCD/scans.pcd(相对运行本 launch 的目录)')
 
+    backend_arg = DeclareLaunchArgument(
+        'backend', default_value='true',
+        description='是否启动 point_lio_backend(回环检测 + 位姿图)。true 时 octomap 与 rviz '
+                    '切到 map 系;false 时退回改造前行为(camera_init 系)')
+
     driver = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([
             FindPackageShare('mid360_driver'),
@@ -114,36 +121,57 @@ def generate_launch_description():
         }.items(),
     )
 
-    octomap = IncludeLaunchDescription(
+    backend = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([
-            FindPackageShare('mid360_bringup'),
-            'launch', 'octomap_mid360.launch.py',
-        ]))
+            FindPackageShare('point_lio_backend'),
+            'launch', 'backend_mid360.launch.py',
+        ])),
+        condition=IfCondition(LaunchConfiguration('backend')),
     )
 
-    # rviz 直接在父级定义;只读 show_rviz(不会被任何 include 改动)
-    rviz_node = Node(
-        package='rviz2',
-        executable='rviz2',
-        name='rviz2',
-        output='screen',
-        arguments=['-d', PathJoinSubstitution([
-            FindPackageShare('mid360_bringup'), 'rviz', 'octomap_mid360.rviz'
-        ])],
-        # octomap_rviz_plugins 2.1.0 的 .so 缺 liboctomap 的 DT_NEEDED,rviz2 又
-        # 不自己加载 octomap → 不注入的话 OccupancyGrid 显示 dlopen 会报
-        # undefined symbol OcTreeStamped。预加载 1.9.7 即解决(实测符号全解析)。
-        # 用 additional_env 而非 env:env= 会替换整个环境,把 LD_LIBRARY_PATH 冲掉,
-        # rviz2 会因找不到 libOgreMain.so.1.12.10 直接 127 退出。
-        additional_env={'LD_PRELOAD': '/usr/lib/x86_64-linux-gnu/liboctomap.so.1.9.7'},
-        condition=IfCondition(LaunchConfiguration('show_rviz')),
-    )
+    def _octomap_and_rviz(context):
+        """按 backend 开关选择 octomap 世界系与 rviz 配置。
+
+        backend=true: point_lio_backend 发布 map->camera_init 纠偏 TF,octomap 用 map 系;
+        backend=false: 完全退回改造前行为(camera_init 系)。
+        """
+        def _is_on(name):
+            return context.perform_substitution(
+                LaunchConfiguration(name)).strip().lower() in ('1', 'true', 'yes', 'on')
+
+        use_backend = _is_on('backend')
+        show_rviz = _is_on('show_rviz')
+        actions = [IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(PathJoinSubstitution([
+                FindPackageShare('mid360_bringup'),
+                'launch', 'octomap_mid360.launch.py',
+            ])),
+            launch_arguments={'frame_id': 'map' if use_backend else ''}.items(),
+        )]
+        if show_rviz:
+            # 关键:octomap_rviz_plugins 2.1.0 的 .so 缺 liboctomap 的 DT_NEEDED,
+            # rviz2 又自己不加载 octomap → 不注入的话 OccupancyGrid 显示 dlopen 会报
+            # undefined symbol OcTreeStamped。预加载 1.9.7 即解决(实测符号全解析)。
+            # 用 additional_env 而非 env:env= 会替换整个环境,把 LD_LIBRARY_PATH 冲掉。
+            actions.append(Node(
+                package='rviz2',
+                executable='rviz2',
+                name='rviz2',
+                output='screen',
+                arguments=['-d', PathJoinSubstitution([
+                    FindPackageShare('mid360_bringup'), 'rviz',
+                    'backend_map.rviz' if use_backend else 'octomap_mid360.rviz',
+                ])],
+                additional_env={'LD_PRELOAD': '/usr/lib/x86_64-linux-gnu/liboctomap.so.1.9.7'},
+            ))
+        return actions
 
     return LaunchDescription([
         show_rviz_arg,
         pcd_save_arg,
+        backend_arg,
         driver,
         point_lio,
-        octomap,
-        rviz_node,
+        backend,
+        OpaqueFunction(function=_octomap_and_rviz),
     ])

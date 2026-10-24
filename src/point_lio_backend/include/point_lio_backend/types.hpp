@@ -40,7 +40,8 @@ struct KeyframeParams {
 };
 
 struct IcpParams {
-  double max_correspondence = 1.0;   // m
+  double coarse_correspondence = 2.0;  // m，粗配准（先粗后细，容忍回环处的累积漂移）
+  double max_correspondence = 1.0;     // m，精配准
   int max_iterations = 40;
   double max_fitness = 0.10;         // GICP 均方误差
   double min_inlier_ratio = 0.6;
