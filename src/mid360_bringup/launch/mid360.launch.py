@@ -33,6 +33,7 @@ PointCloud2/Imu 与 point_lio 的 lidar_type/timestamp_unit 是否匹配、
 
 import os
 import subprocess
+import tempfile
 
 from ament_index_python.packages import get_package_prefix
 from launch import LaunchDescription
@@ -42,6 +43,55 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+
+
+def _has_package(name):
+    try:
+        get_package_prefix(name)
+        return True
+    except Exception:
+        return False
+
+
+def _prepare_rviz_config(template_path, fixed_frame, drop_octomap_plugin):
+    """按当前环境生成一份 rviz 配置,返回临时文件路径。
+
+    解决两个"环境不全就整个 launch 失败/报一堆插件错"的问题:
+      1. World 系在 backend 开启时是 map、关闭时是 camera_init,而 Fixed Frame
+         写在 rviz 文件里 —— 直接改模板会污染仓库,所以复制一份再替换。
+      2. 本机没装 octomap_rviz_plugins 时,配置里 octomap_rviz_plugins/OccupancyGrid
+         这个 display 类加载不了(rviz 面板里一堆红字)。把这一段删掉即可,
+         其余显示(点云/path/marker/TF)照常。
+    """
+    with open(template_path, encoding='utf-8') as f:
+        lines = f.readlines()
+
+    out = []
+    skip_display = False
+    for line in lines:
+        stripped = line.strip()
+        if skip_display:
+            # display 块以 "- Class:" 开头,遇到下一个 "- Class:" 或顶层键结束
+            if stripped.startswith('- Class:') or (
+                    stripped and not line.startswith(' ' * 6)):
+                skip_display = False
+            else:
+                continue
+        if drop_octomap_plugin and stripped == '- Class: octomap_rviz_plugins/OccupancyGrid':
+            skip_display = True
+            continue
+        if stripped.startswith('Fixed Frame:'):
+            out.append(f'    Fixed Frame: {fixed_frame}\n')
+            continue
+        out.append(line)
+
+    # 用确定性文件名,避免每次启动都在 /tmp 里堆一份(同一模板+世界系只保留一份)。
+    import hashlib
+    digest = hashlib.md5((''.join(out)).encode('utf-8')).hexdigest()[:10]
+    path = os.path.join(tempfile.gettempdir(), f'mid360_rviz_{digest}.rviz')
+    with open(path, 'w', encoding='utf-8') as handle:
+        handle.writelines(out)
+    return path
 
 
 def _run_preflight():
@@ -96,6 +146,11 @@ def generate_launch_description():
         description='是否把建图点云落盘(先验地图用)。留空 = 用 point_lio 的 yaml '
                     '(现为 true);显式 true/false 才覆盖。注意:只在节点【正常退出】'
                     '(Ctrl+C)时写一次,写到 ./PCD/scans.pcd(相对运行本 launch 的目录)')
+
+    use_octomap_arg = DeclareLaunchArgument(
+        'use_octomap', default_value='true',
+        description='是否启动 octomap_server(3D 占据栅格)。需要系统包 ros-jazzy-octomap-server;'
+                    '没装时本 launch 会自动跳过并提示装法,不影响驱动/point_lio/后端')
 
     backend_arg = DeclareLaunchArgument(
         'backend', default_value='true',
@@ -152,10 +207,15 @@ def generate_launch_description():
         )]
 
     def _octomap_and_rviz(context):
-        """按 backend 开关选择 octomap 世界系与 rviz 配置。
+        """按 backend / octomap 可用性组装 octomap + rviz。
 
         backend=true: point_lio_backend 发布 map->camera_init 纠偏 TF,octomap 用 map 系;
         backend=false: 完全退回改造前行为(camera_init 系)。
+
+        octomap_server / octomap_rviz_plugins 是**系统包**(ros-jazzy-octomap-server 等),
+        没装时不能把整个一键启动拖垮 —— 驱动 + point_lio + 后端才是核心链路。
+        所以:没装 octomap_server 就跳过 octomap(大声提示装法),没装 rviz 插件就
+        从配置里去掉那个 display。核心链路照常可用。
         """
         def _is_on(name):
             return context.perform_substitution(
@@ -163,14 +223,37 @@ def generate_launch_description():
 
         use_backend = _is_on('backend')
         show_rviz = _is_on('show_rviz')
-        actions = [IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(PathJoinSubstitution([
-                FindPackageShare('mid360_bringup'),
-                'launch', 'octomap_mid360.launch.py',
-            ])),
-            launch_arguments={'frame_id': 'map' if use_backend else ''}.items(),
-        )]
+        want_octomap = _is_on('use_octomap')
+        has_octomap_server = _has_package('octomap_server')
+        has_octomap_rviz = _has_package('octomap_rviz_plugins')
+
+        actions = []
+        if want_octomap and has_octomap_server:
+            actions.append(IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(PathJoinSubstitution([
+                    FindPackageShare('mid360_bringup'),
+                    'launch', 'octomap_mid360.launch.py',
+                ])),
+                launch_arguments={'frame_id': 'map' if use_backend else ''}.items(),
+            ))
+        elif want_octomap:
+            print('[mid360] ⚠ 本机没有 octomap_server,已跳过 3D 占据栅格(其余链路照常)。'
+                  '\n[mid360]   需要的话: sudo apt install ros-jazzy-octomap-server '
+                  'ros-jazzy-octomap-rviz-plugins', flush=True)
+        if not has_octomap_rviz and show_rviz:
+            print('[mid360] 提示: 没装 octomap_rviz_plugins,rviz 会用去掉 octomap 显示的配置',
+                  flush=True)
+
         if show_rviz:
+            from launch_ros.substitutions import FindPackageShare as _FPS
+            template = PathJoinSubstitution([
+                _FPS('mid360_bringup'), 'rviz',
+                'backend_map.rviz' if use_backend else 'octomap_mid360.rviz',
+            ]).perform(context)
+            rviz_cfg = _prepare_rviz_config(
+                template,
+                fixed_frame='map' if use_backend else 'camera_init',
+                drop_octomap_plugin=not has_octomap_rviz)
             # 关键:octomap_rviz_plugins 2.1.0 的 .so 缺 liboctomap 的 DT_NEEDED,
             # rviz2 又自己不加载 octomap → 不注入的话 OccupancyGrid 显示 dlopen 会报
             # undefined symbol OcTreeStamped。预加载 1.9.7 即解决(实测符号全解析)。
@@ -180,10 +263,7 @@ def generate_launch_description():
                 executable='rviz2',
                 name='rviz2',
                 output='screen',
-                arguments=['-d', PathJoinSubstitution([
-                    FindPackageShare('mid360_bringup'), 'rviz',
-                    'backend_map.rviz' if use_backend else 'octomap_mid360.rviz',
-                ])],
+                arguments=['-d', rviz_cfg],
                 additional_env={'LD_PRELOAD': '/usr/lib/x86_64-linux-gnu/liboctomap.so.1.9.7'},
             ))
         return actions
@@ -192,6 +272,7 @@ def generate_launch_description():
         show_rviz_arg,
         pcd_save_arg,
         backend_arg,
+        use_octomap_arg,
         driver,
         point_lio,
         OpaqueFunction(function=_backend_include),

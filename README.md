@@ -35,7 +35,16 @@ sudo apt install -y ros-jazzy-octomap-server ros-jazzy-octomap-msgs ros-jazzy-oc
 rosdep check --from-paths src --ignore-src
 ```
 
-`octomap-*` 只有 `mid360_bringup` 用到（3D 占据栅格），不装也能跑驱动 + point_lio。
+`octomap-*` 只有 `mid360_bringup` 用到（3D 占据栅格 + 2D 投影），**不装也能跑**驱动 +
+point_lio + 后端 + rviz：
+
+- 没装 `octomap_server`：一键 launch **自动跳过** octomap 并打印装法（不会再整个启动失败）。
+- 没装 `octomap_rviz_plugins`：rviz 用去掉 octomap 显示的配置（其余显示正常）。
+- 想要 3D 栅格 / nav2 的 `/projected_map`：`sudo apt install ros-jazzy-octomap-server
+  ros-jazzy-octomap-rviz-plugins`，或先 `use_octomap:=false` 关掉它。
+
+`point_lio_backend` 需要 Ceres（`sudo apt install libceres-dev`，本机已装 2.2.0）；
+不需要 GTSAM。
 
 `mid360_driver` 上游需要 `libasio-dev`；本仓库的本地补丁 **M1** 已改用系统自带的
 Boost.Asio（`src/mid360_driver/src/asio_compat.hpp`），**不需要**单独安装 Asio。

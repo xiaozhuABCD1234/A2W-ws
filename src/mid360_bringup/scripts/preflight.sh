@@ -367,6 +367,32 @@ if [ -n "$WS" ]; then
   fi
 fi
 
+# ── C8 系统依赖:octomap_server / rviz 插件 ──────────────────────────────
+head2 'C8  系统依赖(octomap / rviz)'
+if [ -n "${AMENT_PREFIX_PATH:-}" ]; then
+  has_octo=0; has_octo_rviz=0
+  IFS_save="$IFS"; IFS=':'
+  for p in $AMENT_PREFIX_PATH; do
+    [ -f "$p/share/ament_index/resource_index/packages/octomap_server" ] && has_octo=1
+    [ -f "$p/share/ament_index/resource_index/packages/octomap_rviz_plugins" ] && has_octo_rviz=1
+  done
+  IFS="$IFS_save"
+  if [ "$has_octo" = 1 ]; then
+    pass "octomap_server 可用(3D 占据栅格)"
+  else
+    warn "本机没装 octomap_server:一键 launch 会**自动跳过** 3D 栅格(驱动/point_lio/后端照常)"
+    info "要 3D 占据栅格(以及 nav2 的 /projected_map):"
+    info "    sudo apt install ros-jazzy-octomap-server ros-jazzy-octomap-rviz-plugins"
+  fi
+  if [ "$has_octo_rviz" = 1 ]; then
+    pass "octomap_rviz_plugins 可用"
+  else
+    info "本机没装 octomap_rviz_plugins:rviz 会用去掉 octomap 显示的配置(其余显示正常)"
+  fi
+else
+  info "AMENT_PREFIX_PATH 为空(还没 source ROS),跳过系统依赖检查"
+fi
+
 # ── R1 运行时:实际 topic 类型 ─────────────────────────────────────────────
 if [ "$RUNTIME" = 1 ]; then
   head2 'R1  运行时 topic 类型'
