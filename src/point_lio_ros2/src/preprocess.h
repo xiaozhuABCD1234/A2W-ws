@@ -122,28 +122,13 @@ namespace ouster_ros {
 // ─── LOCAL PATCH P1(见 docs/PATCHES.md)─────────────────────────────────
 // 上游 dfloreaa/point_lio_ros2 没有 livox 分支:switch(lidar_type) 里只有
 // OUST64 / VELO16 / HESAIxt32 / UNILIDAR,avia_handler 整段被注释。
-// 下面这块是本地补的 MID-360(PointCloud2,xfer_format:=0)支持。
+// 下面这条注释是本地补的 MID-360 支持。驱动已从 livox_ros_driver2 换成
+// Yancey2023/mid360_driver@4adf8df:它发布 /livox/lidar =
+// sensor_msgs/PointCloud2,字段为 x,y,z,intensity(float32) +
+// timestamp(float64,绝对 Unix 秒),不再有 tag/line,也不再是 ns。
+// 因此这里不再注册 livox_ros::Point PCL 结构 —— livox_handler 直接用
+// PointCloud2ConstIterator 按字段名读取,见 preprocess.cpp。
 // 同步上游后请确认此块仍在,否则会静默收不到点云。
-namespace livox_ros {
-    struct EIGEN_ALIGN16 Point {
-        PCL_ADD_POINT4D;
-        float intensity;
-        std::uint8_t tag;
-        std::uint8_t line;
-        double timestamp;
-
-        EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-    };
-}  // namespace livox_ros
-POINT_CLOUD_REGISTER_POINT_STRUCT(livox_ros::Point,
-                                  (float, x, x)
-                                          (float, y, y)
-                                          (float, z, z)
-                                          (float, intensity, intensity)
-                                          (std::uint8_t, tag, tag)
-                                          (std::uint8_t, line, line)
-                                          (double, timestamp, timestamp)
-)
 
 // clang-format off
 POINT_CLOUD_REGISTER_POINT_STRUCT(ouster_ros::Point,
@@ -187,8 +172,8 @@ public:
 private:
     // void avia_handler(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg);
 
-    // LOCAL PATCH P1(见 docs/PATCHES.md):实现见下方同名函数
-    // Livox (Mid-360 / Avia...) pointcloud2, published with xfer_format:=0
+    // LOCAL PATCH P1(见 docs/PATCHES.md):实现见 preprocess.cpp
+    // 新驱动 /livox/lidar 布局:x,y,z,intensity(float32) + timestamp(float64 秒)
     void livox_handler(const sensor_msgs::msg::PointCloud2::SharedPtr &msg);
 
     void oust64_handler(const sensor_msgs::msg::PointCloud2::SharedPtr &msg);

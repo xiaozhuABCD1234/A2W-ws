@@ -21,7 +21,10 @@
         preprocess:
             lidar_type: 1      # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR
             scan_line: 4
-            timestamp_unit: 3   # the unit of time/t field in the PointCloud2 rostopic: 0-second, 1-milisecond, 2-microsecond, 3-nanosecond.
+            # LOCAL PATCH P9(见 docs/PATCHES.md):上游为 3(nanosecond)。
+            # mid360_driver 的 timestamp 字段是 float64 绝对 Unix 秒,所以设 0(SEC)。
+            # 设错不会报错,只会让 curvature 差 1000 倍 —— 静默失去 deskew。
+            timestamp_unit: 0   # the unit of time/t field in the PointCloud2 rostopic: 0-second, 1-milisecond, 2-microsecond, 3-nanosecond.
             blind: 0.5
 
         mapping:

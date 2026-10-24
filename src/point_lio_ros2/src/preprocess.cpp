@@ -1,5 +1,8 @@
 #include "preprocess.h"
 
+#include <algorithm>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
+
 #define RETURN0     0x00
 #define RETURN0AND1 0x10
 
@@ -135,48 +138,80 @@ void Preprocess::process(const sensor_msgs::msg::PointCloud2::SharedPtr &msg, Po
 // }
 
 // ─── LOCAL PATCH P1(见 docs/PATCHES.md)─────────────────────────────────
-// 上游无此函数。作用是把每个点的**绝对 ns 时间**折成 point_lio 内部用的
+// 上游无此函数。作用是把每个点的**绝对时间**折成 point_lio 内部用的
 // curvature(ms,相对帧首)—— 即官方 ROS1 avia_handler 的等价入口,没有它
 // laserMapping 的逐点时间补偿就无从谈起。
-// 时间基准已核对:header.stamp == 帧首点时间
-//(lddc.cpp:310/316 + pub_handler.cpp:281 GetLidarBaseTime)。
+//
+// 驱动:Yancey2023/mid360_driver@4adf8df,发布 /livox/lidar =
+//   sensor_msgs/PointCloud2,point_step = 24,字段表:
+//     offset  0  x          float32
+//     offset  4  y          float32
+//     offset  8  z          float32
+//     offset 12  intensity  float32
+//     offset 16  timestamp  float64 = 绝对 Unix 秒
+//   无 tag/line。这里按字段名读取,不依赖 offset 顺序;字段缺失时
+//   PointCloud2ConstIterator 会抛 std::runtime_error,下面 catch 后打日志。
+//
+// 时间基准:header.stamp,不取首点。驱动保证 header.stamp = 本帧最早点
+// 时刻;laserMapping.cpp 里 meas.lidar_beg_time = time_buffer.front() =
+// header.stamp,P4 deskew 用 t_i = curvature/1000 + lidar_beg_time。
+// 所以 curvature 必须相对 header.stamp,否则整帧点云会有系统性时间偏移。
+// curvature 单位 ms:time_unit_scale 由 process() 按 timestamp_unit 算好
+// (SEC -> 1e3,即秒 -> 毫秒)。
 void Preprocess::livox_handler(const sensor_msgs::msg::PointCloud2::SharedPtr &msg) {
     pl_surf.clear();
     pl_corn.clear();
     pl_full.clear();
 
-    // Livox Mid-360 via livox_ros_driver2 with xfer_format:=0 (PointCloud2).
-    // Point layout: x, y, z, intensity (float32); tag, line (uint8);
-    // timestamp (float64) = ABSOLUTE device time in ns (frame head == first point).
-    pcl::PointCloud<livox_ros::Point> pl_orig;
-    pcl::fromROSMsg(*msg, pl_orig);
-    int plsize = pl_orig.points.size();
+    if (!msg) return;
+    const size_t plsize = static_cast<size_t>(msg->width) * static_cast<size_t>(msg->height);
     if (plsize == 0) return;
-    pl_surf.reserve(plsize);
 
-    // 帧内时间基准：取第一个点的时间（与 header.stamp 一致）
-    double time_head = pl_orig.points[0].timestamp;
+    try {
+        // 构造迭代器时按字段名校验,字段缺失会抛 std::runtime_error
+        sensor_msgs::PointCloud2ConstIterator<float> it_x(*msg, "x");
+        sensor_msgs::PointCloud2ConstIterator<float> it_y(*msg, "y");
+        sensor_msgs::PointCloud2ConstIterator<float> it_z(*msg, "z");
+        sensor_msgs::PointCloud2ConstIterator<float> it_intensity(*msg, "intensity");
+        sensor_msgs::PointCloud2ConstIterator<double> it_timestamp(*msg, "timestamp");
 
-    for (int i = 0; i < plsize; i++) {
-        PointType added_pt;
-        added_pt.normal_x = 0;
-        added_pt.normal_y = 0;
-        added_pt.normal_z = 0;
-        added_pt.x = pl_orig.points[i].x;
-        added_pt.y = pl_orig.points[i].y;
-        added_pt.z = pl_orig.points[i].z;
-        added_pt.intensity = pl_orig.points[i].intensity;
-        // 绝对 ns -> 相对帧头 -> 按 timestamp_unit 缩放为 ms（NS -> 1e-6）
-        added_pt.curvature = (pl_orig.points[i].timestamp - time_head) * time_unit_scale;
-        if (added_pt.curvature < 0) added_pt.curvature = 0;
+        const double time_head = rclcpp::Time(msg->header.stamp).seconds();
 
-        if (i % point_filter_num == 0) {
-            if (added_pt.x * added_pt.x
-                + added_pt.y * added_pt.y
-                + added_pt.z * added_pt.z > (blind * blind)) {
-                pl_surf.points.push_back(added_pt);
+        pl_surf.reserve(plsize);
+        pl_full.reserve(plsize);
+
+        for (size_t i = 0; i < plsize;
+             ++i, ++it_x, ++it_y, ++it_z, ++it_intensity, ++it_timestamp) {
+            PointType added_pt;
+            added_pt.normal_x = 0;
+            added_pt.normal_y = 0;
+            added_pt.normal_z = 0;
+            added_pt.x = *it_x;
+            added_pt.y = *it_y;
+            added_pt.z = *it_z;
+            added_pt.intensity = *it_intensity;
+            // 绝对秒 -> 相对 header.stamp -> 按 timestamp_unit 缩放为 ms
+            const double offset_ms =
+                    (*it_timestamp - time_head) * static_cast<double>(time_unit_scale);
+            added_pt.curvature = static_cast<float>(std::max(0.0, offset_ms));
+
+            if (i % point_filter_num == 0) {
+                if (added_pt.x * added_pt.x
+                    + added_pt.y * added_pt.y
+                    + added_pt.z * added_pt.z > (blind * blind)) {
+                    pl_surf.points.push_back(added_pt);
+                }
             }
         }
+    } catch (const std::exception &e) {
+        // 字段缺失/布局不符:明确报错并返回空点云(不崩溃、不静默)
+        pl_surf.clear();
+        RCLCPP_ERROR(rclcpp::get_logger("point_lio_preprocess"),
+                     "livox_handler: invalid PointCloud2 layout: %s "
+                     "(need x,y,z,intensity float32 + timestamp float64 seconds; "
+                     "point_step=%u)",
+                     e.what(), static_cast<unsigned>(msg->point_step));
+        return;
     }
 }
 
