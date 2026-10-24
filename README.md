@@ -106,6 +106,11 @@ ros2 launch mid360_bringup mid360.launch.py
 | `/cloud_registered` | `sensor_msgs/PointCloud2` | 10 Hz |
 | `/aft_mapped_to_init` | `nav_msgs/Odometry` | 里程计（**不叫 `/Odometry`**） |
 | `/Laser_map`, `/cloud_effected`, `/path` | | |
+| `/backend/path` | `nav_msgs/Path` | 后端优化轨迹(map 系) |
+| `/backend/odom` | `nav_msgs/Odometry` | 后端实时位姿(map→body) |
+| `/backend/map_points` | `sensor_msgs/PointCloud2` | 后端优化点云(map 系) |
+| `/backend/loop_markers` | `visualization_msgs/MarkerArray` | 回环边 + 关键帧 |
+| `/backend/status` | `diagnostic_msgs/DiagnosticArray` | 关键帧/回环/优化耗时 |
 
 `odom_only:=true` 时里程计改名 `/odom_corrected`。
 
@@ -227,14 +232,89 @@ ros2 launch mid360_bringup octomap_mid360.launch.py resolution:=0.2 max_range:=3
 - 开启 octomap_server 后多了一个吃 10 Hz 稠密点云的 C++ 节点。若 CPU 吃紧，
   先把 `sensor_model.max_range` 调到 10~15 m，或把 point_lio 的
   `point_filter_num` / `filter_size_surf` 调大。
-- **没有回环检测**：point_lio 是纯 LIO，长时间绕回来会有漂移，octomap 会把
-  同一面墙叠成两层。短时间建图没问题，要长期一致得先上 FAST-LIO-SAM 那类回环。
+- **point_lio 本身没有回环**：纯 LIO 长时间绕回来会有漂移，octomap 会把同一面墙
+  叠成两层。本工作区用 `point_lio_backend` 补上了回环检测 + 位姿图（默认开启，见
+  「后端优化」一节）；`backend:=false` 时回到原来的纯 LIO 行为。
 - 跑完想存地图：`ros2 run octomap_server octomap_saver -f ~/map`（需先让
   节点发布 `/octomap_full`；另 `.bt` 可用 `octovis` 看）。
 
-## 与上游的差异
+## 后端优化（回环检查 + 位姿图）
 
-本工作空间对两个上游包做过实质改造，这是本仓库存在的主要价值：
+point_lio 只做前端 LIO，没有回环，长距离绕回来必然漂移。`point_lio_backend` 是独立进程：
+订阅前端输出、检测回环、跑 Ceres 位姿图，把世界系统一到新的 `map` 系，并通过 TF 把纠偏量
+实时作用到 octomap / nav2。**不改 point_lio 源码**。
+
+```
+map --(backend, 20 Hz 纠偏)--> camera_init --(point_lio)--> body
+```
+
+| 项 | 值 |
+|---|---|
+| 回环检测 | Scan Context（20 环 × 60 扇区）+ GICP 粗到细校验 |
+| 优化 | Ceres 6-DOF 位姿图（Huber + 残差门控剔外点） |
+| 纠偏 | `T_map_camera_init = T_map_body · (T_camera_init_body)⁻¹`，一阶平滑 1.5 s |
+| 输出 | `/backend/path`、`/backend/odom`、`/backend/map_points`、`/backend/loop_markers`、`/backend/status`、TF `map→camera_init` |
+
+### 启动
+
+```bash
+# 默认开启后端（octomap / rviz 自动切到 map 系）
+ros2 launch mid360_bringup mid360.launch.py
+
+# 关掉后端，回到改造前行为（octomap 用 camera_init）
+ros2 launch mid360_bringup mid360.launch.py backend:=false
+
+# 只调试后端（前端另开终端）
+ros2 launch point_lio_backend backend_mid360.launch.py
+```
+
+### 验收（绕一圈）
+
+1. 起步后 `ros2 topic echo /backend/status`：`keyframes` 在增长、`loops=0`。
+2. 绕回起点附近，`/backend/loop_markers` 出现回环边，`loops` 加一，
+   `/backend/path` 在起点处闭合。
+3. `ros2 run tf2_ros tf2_echo map camera_init`：纠偏量在 1~2 s 内平滑收敛。
+4. octomap（map 系）里的重影会在继续观察几秒后被射线清掉；要立刻得到干净地图，
+   优化收敛后重启 octomap / 重新建图。
+
+### 调参
+
+唯一真相源是 `src/point_lio_backend/config/backend_mid360.yaml`，常用项：
+
+- `keyframe.min_distance` / `min_rotation_deg`：关键帧密度。调小 → 回环更容易、CPU 更高。
+- `scan_context.sc_distance_threshold`（0.35）：调小更保守，重复走廊建议 0.30。
+- `icp.max_fitness` / `min_inlier_ratio`：回环几何校验门限。
+- `output.correction_tau`：纠偏平滑时间常数；0 = 回环瞬间直接跳。
+- `runtime.pending_clouds`：后端排队上限，CPU 吃紧时保持 2。
+
+### 已知限制
+
+- **现有 `PCD/scans.pcd` 不能事后优化**：它只有合并后的点，没有逐帧位姿。后端必须
+  建图时在线跑；要复算只能重跑一遍建图。
+- **重复走廊可能误检**：SC + GICP + 修正量门限已经比较保守，仍建议把
+  `sc_distance_threshold` 调到 0.30 并看 `/backend/loop_markers`。
+- **漂移 > 5 m 可能漏检**：GICP 初值来自前端相对位姿，漂移过大时宁可安全失败
+  （不优化），也不会把地图拉歪。
+- **后端重启 = 图丢失**：重启后端会重新锚定 `map`，octomap 需一并重启。
+- 后端崩溃时 `map→camera_init` TF 消失，octomap/rviz 会报 TF 错误；此时用
+  `backend:=false` 或重启整套。
+
+### 测试
+
+```bash
+# 单元测试（Scan Context / 位姿图 / 关键帧）
+PATH=/usr/bin:$PATH colcon test --packages-select point_lio_backend --event-handlers console_direct+
+
+# 合成回环（不需要真实雷达；先用 PCD/scans.pcd 当世界）
+export ROS_DOMAIN_ID=77
+source install/setup.bash
+python3 src/point_lio_backend/test/integration/synthetic_loop_replay.py --mode loop
+python3 src/point_lio_backend/test/integration/synthetic_loop_replay.py --mode straight
+```
+
+### 与上游的差异
+
+本工作空间对两个上游包做过实质改造，并新增了自有后端包，这是本仓库存在的主要价值：
 
 ### mid360_driver
 上游：`https://github.com/Yancey2023/mid360_driver`（upstream/main `e2ba0ca`，MIT，作者 Yingjie Huang）。
@@ -269,6 +349,17 @@ ros2 launch mid360_bringup octomap_mid360.launch.py resolution:=0.2 max_range:=3
   `timestamp_unit` 由 `3`（ns）改为 `0`（秒，P9），与 `mid360_driver` 的点时间一致；
   `mapping.acc_norm` 由 `1.0`（g）改为 `9.81`（m/s²，P10），因为 `mid360_driver` 发布 IMU
   前已把原始 g 值乘 9.81（旧 `livox_ros_driver2` 直接发 g）。
+
+### point_lio_backend（**本仓库新增包**，非上游）
+
+独立在线后端：Scan Context 回环检测 + GICP 校验 + Ceres 6-DOF 位姿图，输入只订阅
+`/aft_mapped_to_init` 与 `/cloud_registered_body`，输出 `map` 系纠偏 TF / 轨迹 / 点云
+（详见 README「后端优化」一节与 `docs/BACKEND_SPEC.md`）。
+
+- **不改任何 vendored 源码**：point_lio 与 mid360_driver 的 diff 仍只有 P1~P11 / M1~M2。
+- `backend:=true`（默认）时 octomap / rviz 使用 `map` 系；`backend:=false` 时完全退回
+  `camera_init` 系。
+- 依赖：Ceres 2.2（系统 `libceres-dev`，已装）、PCL、Eigen、tf2_eigen；不需要 GTSAM。
 
 ### mid360_bringup（**本仓库新增包**，非上游）
 
