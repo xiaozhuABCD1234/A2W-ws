@@ -89,7 +89,7 @@ TEST(KeyframeManager, RotationTrigger) {
   ASSERT_TRUE(manager.buildNextKeyframe(&kf));
 
   // 再来 5 deg（相对上一关键帧仅 5 deg）不应触发。
-  const Eigen::Isometry3d pose_small = poseAt(0.2, 0.0, 5.0 * M_PI / 180.0);
+  const Eigen::Isometry3d pose_small = poseAt(0.2, 0.0, 20.0 * M_PI / 180.0);
   manager.addFrame(1.0, pose_small, makeCloud());
   EXPECT_FALSE(manager.shouldCreate(1.0, pose_small));
 }

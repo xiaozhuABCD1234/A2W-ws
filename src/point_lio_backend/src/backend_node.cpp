@@ -1,4 +1,5 @@
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/executors/multi_threaded_executor.hpp>
 
 #include <diagnostic_msgs/msg/diagnostic_array.hpp>
 #include <diagnostic_msgs/msg/diagnostic_status.hpp>
@@ -52,7 +53,9 @@ rclcpp::Time toRosTime(double seconds) {
 
 Eigen::Isometry3d odomPoseToEigen(const nav_msgs::msg::Odometry& odom) {
   geometry_msgs::msg::Transform transform;
-  transform.translation = odom.pose.pose.position;
+  transform.translation.x = odom.pose.pose.position.x;
+  transform.translation.y = odom.pose.pose.position.y;
+  transform.translation.z = odom.pose.pose.position.z;
   transform.rotation = odom.pose.pose.orientation;
   return tf2::transformToEigen(transform);
 }
@@ -61,7 +64,14 @@ Eigen::Isometry3d odomPoseToEigen(const nav_msgs::msg::Odometry& odom) {
 
 struct PendingPair {
   double stamp = 0.0;
+  int64_t stamp_ns = 0;
   Eigen::Isometry3d pose_raw = Eigen::Isometry3d::Identity();
+  PointCloudPtr cloud;
+};
+
+struct WaitingCloud {
+  double stamp = 0.0;
+  int64_t stamp_ns = 0;
   PointCloudPtr cloud;
 };
 
@@ -137,6 +147,8 @@ class BackendNode : public rclcpp::Node {
         declareParam<double>("scan_context.min_time_gap_sec", sc.min_time_gap_sec);
 
     auto& icp = params_.icp;
+    icp.coarse_correspondence =
+        declareParam<double>("icp.coarse_correspondence", icp.coarse_correspondence);
     icp.max_correspondence =
         declareParam<double>("icp.max_correspondence", icp.max_correspondence);
     icp.max_iterations = declareParam<int>("icp.max_iterations", icp.max_iterations);
@@ -274,8 +286,8 @@ class BackendNode : public rclcpp::Node {
         }
         // 先到的点云在等这帧 odom。
         for (auto it = waiting_clouds_.begin(); it != waiting_clouds_.end();) {
-          if (std::fabs(it->first - stamp) <= params_.runtime.stamp_tolerance_sec) {
-            ready.push_back(PendingPair{it->first, pose, it->second});
+          if (std::fabs(it->stamp - stamp) <= params_.runtime.stamp_tolerance_sec) {
+            ready.push_back(PendingPair{it->stamp, it->stamp_ns, pose, it->cloud});
             it = waiting_clouds_.erase(it);
           } else {
             ++it;
@@ -295,7 +307,9 @@ class BackendNode : public rclcpp::Node {
     try {
       PointCloudPtr cloud(new PointCloudT());
       pcl::fromROSMsg(*msg, *cloud);
-      const double stamp = rclcpp::Time(msg->header.stamp).seconds();
+      const rclcpp::Time stamp_ros(msg->header.stamp);
+      const double stamp = stamp_ros.seconds();
+      const int64_t stamp_ns = stamp_ros.nanoseconds();
 
       bool matched = false;
       Eigen::Isometry3d pose = Eigen::Isometry3d::Identity();
@@ -305,7 +319,7 @@ class BackendNode : public rclcpp::Node {
         // 过期的等待点云（没有匹配 odom）丢弃。
         const double ttl = std::max(0.5, 10.0 * params_.runtime.stamp_tolerance_sec);
         while (!waiting_clouds_.empty() &&
-               stamp - waiting_clouds_.front().first > ttl) {
+               stamp - waiting_clouds_.front().stamp > ttl) {
           waiting_clouds_.pop_front();
           ++dropped;
         }
@@ -325,7 +339,7 @@ class BackendNode : public rclcpp::Node {
           matched = true;
         } else {
           // point_lio 可能先发 cloud 再发 odom：短暂缓存等待配对。
-          waiting_clouds_.emplace_back(stamp, cloud);
+          waiting_clouds_.emplace_back(WaitingCloud{stamp, stamp_ns, cloud});
           const size_t max_waiting = std::max<size_t>(8, 4 * max_queue_);
           while (waiting_clouds_.size() > max_waiting) {
             waiting_clouds_.pop_front();
@@ -339,7 +353,7 @@ class BackendNode : public rclcpp::Node {
                              dropped, params_.runtime.stamp_tolerance_sec);
       }
       if (matched) {
-        enqueuePair(PendingPair{stamp, pose, cloud});
+        enqueuePair(PendingPair{stamp, stamp_ns, pose, cloud});
       }
     } catch (const std::exception& e) {
       RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000,
@@ -415,6 +429,7 @@ class BackendNode : public rclcpp::Node {
       {
         std::lock_guard<std::mutex> lock(state_mutex_);
         keyframes_.clear();
+        keyframe_stamp_ns_.clear();
         loops_.clear();
         correction_.setIdentity();
         target_correction_.setIdentity();
@@ -478,6 +493,7 @@ class BackendNode : public rclcpp::Node {
       {
         std::lock_guard<std::mutex> lock(state_mutex_);
         keyframes_.push_back(keyframe);
+        keyframe_stamp_ns_.push_back(job.stamp_ns);
         if (loop.has_value()) {
           loops_.push_back(*loop);
           last_fitness_ = loop->fitness;
@@ -543,47 +559,70 @@ class BackendNode : public rclcpp::Node {
   }
 
   // ── 发布 ────────────────────────────────────────────────────────────────
+  struct TimedPose {
+    double stamp = 0.0;
+    int64_t stamp_ns = 0;
+    Eigen::Isometry3d pose = Eigen::Isometry3d::Identity();
+  };
+
+  rclcpp::Time poseStamp(const TimedPose& pose) const {
+    if (pose.stamp_ns > 0) {
+      return rclcpp::Time(pose.stamp_ns);
+    }
+    return toRosTime(pose.stamp);
+  }
+
   void publishPath() {
-    std::vector<std::pair<double, Eigen::Isometry3d>> poses;
+    std::vector<TimedPose> poses;
     {
       std::lock_guard<std::mutex> lock(state_mutex_);
       poses.reserve(keyframes_.size());
-      for (const auto& kf : keyframes_) {
-        poses.emplace_back(kf.stamp, kf.pose_opt);
+      for (size_t i = 0; i < keyframes_.size(); ++i) {
+        TimedPose tp;
+        tp.stamp = keyframes_[i].stamp;
+        tp.stamp_ns =
+            i < keyframe_stamp_ns_.size() ? keyframe_stamp_ns_[i] : 0;
+        tp.pose = keyframes_[i].pose_opt;
+        poses.push_back(tp);
       }
     }
     nav_msgs::msg::Path path;
     path.header.frame_id = params_.world_frame;
-    path.header.stamp = poses.empty() ? now() : toRosTime(poses.back().first);
+    path.header.stamp = poses.empty() ? now() : poseStamp(poses.back());
     path.poses.reserve(poses.size());
     for (const auto& item : poses) {
       geometry_msgs::msg::PoseStamped ps;
       ps.header.frame_id = params_.world_frame;
-      ps.header.stamp = toRosTime(item.first);
-      ps.pose = tf2::toMsg(item.second);
+      ps.header.stamp = poseStamp(item);
+      ps.pose = tf2::toMsg(item.pose);
       path.poses.push_back(std::move(ps));
     }
     path_pub_->publish(path);
   }
 
   void publishRawPath() {
-    std::vector<std::pair<double, Eigen::Isometry3d>> poses;
+    std::vector<TimedPose> poses;
     {
       std::lock_guard<std::mutex> lock(state_mutex_);
       poses.reserve(keyframes_.size());
-      for (const auto& kf : keyframes_) {
-        poses.emplace_back(kf.stamp, kf.pose_raw);
+      for (size_t i = 0; i < keyframes_.size(); ++i) {
+        TimedPose tp;
+        tp.stamp = keyframes_[i].stamp;
+        tp.stamp_ns =
+            i < keyframe_stamp_ns_.size() ? keyframe_stamp_ns_[i] : 0;
+        tp.pose = keyframes_[i].pose_raw;
+        poses.push_back(tp);
       }
     }
     nav_msgs::msg::Path path;
     path.header.frame_id = params_.odom_frame;
-    path.header.stamp = poses.empty() ? now() : toRosTime(poses.back().first);
+    path.header.stamp = poses.empty() ? now() : poseStamp(poses.back());
     path.poses.reserve(poses.size());
     for (const auto& item : poses) {
       geometry_msgs::msg::PoseStamped ps;
       ps.header.frame_id = params_.odom_frame;
-      ps.header.stamp = toRosTime(item.first);
-      ps.pose = tf2::toMsg(item.second);
+      ps.header.stamp = poseStamp(item);
+      ps.pose = tf2::toMsg(item.pose);
       path.poses.push_back(std::move(ps));
     }
     path_raw_pub_->publish(path);
@@ -606,11 +645,17 @@ class BackendNode : public rclcpp::Node {
     // 只在 worker 线程调用；keyframes_ 的写者也是 worker，读安全。
     PointCloudT::Ptr merged(new PointCloudT());
     double last_stamp = 0.0;
+    int64_t last_stamp_ns = 0;
+    size_t index = 0;
     for (const auto& kf : keyframes_) {
       if (!kf.cloud) {
         continue;
       }
       last_stamp = kf.stamp;
+      if (index < keyframe_stamp_ns_.size() && keyframe_stamp_ns_[index] > 0) {
+        last_stamp_ns = keyframe_stamp_ns_[index];
+      }
+      ++index;
       const Eigen::Isometry3d& T = kf.pose_opt;
       const Eigen::Matrix3d R = T.linear();
       const Eigen::Vector3d t = T.translation();
@@ -642,14 +687,22 @@ class BackendNode : public rclcpp::Node {
     sensor_msgs::msg::PointCloud2 msg;
     pcl::toROSMsg(*merged, msg);
     msg.header.frame_id = params_.world_frame;
-    msg.header.stamp = keyframes_.empty() ? now() : toRosTime(last_stamp);
+    msg.header.stamp = keyframes_.empty()
+                            ? now()
+                            : (last_stamp_ns > 0 ? rclcpp::Time(last_stamp_ns)
+                                                 : toRosTime(last_stamp));
     map_pub_->publish(msg);
   }
 
   void publishLoopMarkers() {
     // 只在 worker 线程调用。
     visualization_msgs::msg::MarkerArray array;
-    const rclcpp::Time stamp = keyframes_.empty() ? now() : toRosTime(keyframes_.back().stamp);
+    const rclcpp::Time stamp =
+        keyframes_.empty()
+            ? now()
+            : (!keyframe_stamp_ns_.empty() && keyframe_stamp_ns_.back() > 0
+                   ? rclcpp::Time(keyframe_stamp_ns_.back())
+                   : toRosTime(keyframes_.back().stamp));
 
     visualization_msgs::msg::Marker loops;
     loops.header.frame_id = params_.world_frame;
@@ -866,7 +919,7 @@ class BackendNode : public rclcpp::Node {
 
   std::mutex buffer_mutex_;
   std::deque<std::pair<double, Eigen::Isometry3d>> odom_buffer_;
-  std::deque<std::pair<double, PointCloudPtr>> waiting_clouds_;
+  std::deque<WaitingCloud> waiting_clouds_;
 
   std::mutex odom_mutex_;
   Eigen::Isometry3d latest_odom_pose_ = Eigen::Isometry3d::Identity();
@@ -877,6 +930,7 @@ class BackendNode : public rclcpp::Node {
 
   std::mutex state_mutex_;
   std::vector<Keyframe> keyframes_;
+  std::vector<int64_t> keyframe_stamp_ns_;
   std::vector<LoopConstraint> loops_;
   Eigen::Isometry3d correction_ = Eigen::Isometry3d::Identity();
   Eigen::Isometry3d target_correction_ = Eigen::Isometry3d::Identity();
