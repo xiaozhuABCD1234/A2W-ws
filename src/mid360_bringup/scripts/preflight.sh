@@ -3,12 +3,13 @@
 # mid360_bringup preflight —— 启动前的配置自洽性检查
 #
 # 为什么需要它:这条链路上最危险的不是崩溃,而是**静默的错配**。
-#   驱动 launch 的 xfer_format 决定 /livox/lidar 的消息类型,
-#   point_lio 的 preprocess.lidar_type 决定它用哪个 handler 去解。
-#   两者错配时(见 commit 4ec2c6a)point_lio 不报错、IMU 初始化能到 100%,
-#   但永远收不到点云 —— 现场表现为"rviz 里什么都没有",排查成本极高。
-#   同类问题:octomap 必须喂机体系点云、point_lio 的 timestamp_unit 必须
-#   与驱动的点时间单位一致。这些都交给本脚本在启动前拦住。
+#   mid360_driver 直接发 PointCloud2(x/y/z/intensity float32 + timestamp
+#   float64 绝对 Unix 秒);point_lio 的 preprocess.lidar_type 决定用哪个
+#   handler 去解,timestamp_unit 决定把帧内时差缩放到 ms 的系数。
+#   错配时 point_lio 不报错、IMU 初始化能到 100%,但点云时间轴错位或永远
+#   收不到点云 —— 现场表现为"rviz 里什么都没有/旋转重影",排查成本极高。
+#   同类问题:octomap 必须喂机体系点云、驱动 host_ip 必须等于本机网卡地址。
+#   这些都交给本脚本在启动前拦住。
 #
 # 用法:
 #   preflight.sh                      # 静态检查:只读配置/源码,不需要 ROS 在跑
@@ -65,14 +66,16 @@ fi
 # 先 src/ 后 install/ 拷贝:正常情况下两者一致,不一致本身会被本脚本报出来
 pick() { for f in "$@"; do [ -f "$f" ] && { printf '%s\n' "$f"; return 0; }; done; return 1; }
 
-PIO_CFG=""; PIO_LAUNCH=""; DRV_LAUNCH=""; OCM_CFG=""; OCM_LAUNCH=""; PREPROC=""
+PIO_CFG=""; PIO_LAUNCH=""; DRV_CFG=""; DRV_LAUNCH=""; OCM_CFG=""; OCM_LAUNCH=""; PREPROC=""
 if [ -n "$WS" ]; then
   PIO_CFG="$(pick "$WS/src/point_lio_ros2/config/mid360.yaml" \
                   "$WS/install/point_lio/share/point_lio/config/mid360.yaml")" || true
   PIO_LAUNCH="$(pick "$WS/src/point_lio_ros2/launch/mapping_mid360.launch.py" \
                      "$WS/install/point_lio/share/point_lio/launch/mapping_mid360.launch.py")" || true
-  DRV_LAUNCH="$(pick "$WS/src/livox_ros_driver2/launch_ROS2/msg_MID360_launch.py" \
-                     "$WS/install/livox_ros_driver2/share/livox_ros_driver2/launch_ROS2/msg_MID360_launch.py")" || true
+  DRV_CFG="$(pick "$WS/src/mid360_driver/config/param.yaml" \
+                  "$WS/install/mid360_driver/share/mid360_driver/config/param.yaml")" || true
+  DRV_LAUNCH="$(pick "$WS/src/mid360_driver/launch/mid360_driver.launch.py" \
+                     "$WS/install/mid360_driver/share/mid360_driver/launch/mid360_driver.launch.py")" || true
   OCM_CFG="$(pick "$WS/src/mid360_bringup/config/octomap_mid360.yaml" \
                   "$WS/install/mid360_bringup/share/mid360_bringup/config/octomap_mid360.yaml")" || true
   OCM_LAUNCH="$(pick "$WS/src/mid360_bringup/launch/octomap_mid360.launch.py" \
@@ -95,6 +98,14 @@ yaml_get() {
   sed -n "s/^[[:space:]]*$2:[[:space:]]*\([^#]*\).*/\1/p" "$1" | head -1 | tr -d ' "'
 }
 
+# 驱动侧参数(与 point_lio 对比,C3/C4 用)
+DRV_LIDAR_TOPIC=""; DRV_IMU_TOPIC=""; HOST_IP=""
+if [ -n "$DRV_CFG" ]; then
+  DRV_LIDAR_TOPIC="$(yaml_get "$DRV_CFG" lidar_topic)"
+  DRV_IMU_TOPIC="$(yaml_get "$DRV_CFG" imu_topic)"
+  HOST_IP="$(yaml_get "$DRV_CFG" host_ip)"
+fi
+
 LIDAR_TYPE="$(yaml_get "$PIO_CFG" lidar_type)"
 TS_UNIT="$(yaml_get "$PIO_CFG" timestamp_unit)"
 LID_TOPIC_CFG="$(yaml_get "$PIO_CFG" lid_topic)"
@@ -103,77 +114,84 @@ BODY_PUB="$(yaml_get "$PIO_CFG" scan_bodyframe_pub_en)"
 DET_RANGE="$(yaml_get "$PIO_CFG" det_range)"
 SCAN_LINE="$(yaml_get "$PIO_CFG" scan_line)"
 
-# ── C1 驱动格式 vs point_lio 分支 ──────────────────────────────────────────
-head2 'C1  驱动 xfer_format  vs  point_lio lidar_type'
-XFER=""
-[ -n "$DRV_LAUNCH" ] && XFER="$(sed -n 's/^[[:space:]]*xfer_format[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p' "$DRV_LAUNCH" | head -1)"
-
-case "$LIDAR_TYPE" in
-  1) # Livox(AVIA)。MID-360 走这条。
-    if [ "$XFER" = "1" ]; then
-      fail "xfer_format=1 发的是 livox_ros_driver2/CustomMsg,而当前代码只补了 PointCloud2 通路"
-      info "CustomMsg 版 avia_handler 在 preprocess.cpp 里仍是注释状态,订阅类型也不兼容。"
-      info "选定一条:① 改回 xfer_format=0(推荐,零改动);"
-      info "             ② 按 docs/PATCHES.md 恢复 CustomMsg 通路后再用 1。"
-    else
-      # xfer_format=0(或没读到,默认也是 0)-> 必须有本地补丁 P1
-      [ "$XFER" = "0" ] || warn "没能从驱动 launch 里读出 xfer_format,按默认 0(PointCloud2)检查"
-      if [ -z "$PREPROC" ]; then
-        fail "找不到 src/point_lio_ros2/src/preprocess.cpp,无法确认 livox_handler 存在"
-        info "设 MID360_WS 指向工作空间根目录后重试"
-      elif grep -q 'case AVIA:' "$PREPROC" && grep -q 'void Preprocess::livox_handler' "$PREPROC"; then
-        pass "PointCloud2 + livox_handler 齐备(本地补丁 P1 在位)"
-      else
-        fail "lidar_type=1 + xfer_format=0,但 preprocess.cpp 里没有 livox_handler/case AVIA"
-        info "多半是同步上游时补丁被覆盖。见 docs/PATCHES.md 的 P1,恢复后再 build。"
-      fi
-    fi
-    ;;
-  2) # Velodyne
-    if [ "$XFER" != "0" ]; then
-      fail "lidar_type=2(Velodyne)只接受 PointCloud2,但 xfer_format=${XFER:-未读到}"
-    else
-      pass "lidar_type=2 + PointCloud2"
-    fi
-    ;;
-  3) # Ouster
-    pass "lidar_type=3(Ouster64):与 MID-360 无关,跳过组合检查"
-    ;;
-  *)
-    fail "lidar_type='${LIDAR_TYPE:-空}' 无法识别(1=Livox 2=Velodyne 3=Ouster)"
-    ;;
-esac
+# ── C1 驱动包/config 与 point_lio 分支 ─────────────────────────────────────
+head2 'C1  驱动包/config 与 point_lio 分支'
+if [ -z "$DRV_CFG" ]; then
+  fail "找不到 mid360_driver 的 config/param.yaml"
+  info "确认 src/mid360_driver 已 vendor,或先 colcon build --packages-select mid360_driver"
+elif [ -z "$DRV_LAUNCH" ]; then
+  fail "找不到 mid360_driver 的 launch/mid360_driver.launch.py"
+else
+  pass "mid360_driver 包、config 与 launch 齐备"
+fi
+if [ "$LIDAR_TYPE" = "1" ]; then
+  pass "point_lio preprocess.lidar_type=1(Livox handler)"
+else
+  fail "preprocess.lidar_type='$LIDAR_TYPE',应为 1(Livox)"
+fi
+if [ -z "$PREPROC" ]; then
+  fail "找不到 src/point_lio_ros2/src/preprocess.cpp,无法确认 P1 补丁"
+  info "设 MID360_WS 指向工作空间根目录后重试"
+elif grep -q 'void Preprocess::livox_handler' "$PREPROC" \
+     && grep -q 'PointCloud2ConstIterator' "$PREPROC"; then
+  pass "livox_handler + PointCloud2ConstIterator 齐备(本地补丁 P1 在位)"
+else
+  fail "preprocess.cpp 缺少 livox_handler 或 PointCloud2ConstIterator(P1 不在位)"
+  info "mid360_driver 的点云布局为 x/y/z/intensity(float32) + timestamp(float64,秒);"
+  info "P1 必须用 PointCloud2ConstIterator 解析,不能再用 livox_ros::Point/fromROSMsg。"
+  info "多半是同步上游时补丁被覆盖。见 docs/PATCHES.md 的 P1,恢复后再 build。"
+fi
 
 # ── C2 点时间单位 ──────────────────────────────────────────────────────────
 head2 'C2  点时间单位 timestamp_unit'
-if [ "$LIDAR_TYPE" = "1" ] && [ "${XFER:-0}" != "1" ]; then
-  if [ "$TS_UNIT" = "3" ]; then
-    pass "timestamp_unit=3(ns):与驱动 PointCloud2 的 timestamp(double,ns)一致"
+if [ "$LIDAR_TYPE" = "1" ]; then
+  if [ "$TS_UNIT" = "0" ]; then
+    pass "timestamp_unit=0(秒):与 mid360_driver 的 float64 绝对 Unix 秒一致"
   else
-    fail "timestamp_unit=${TS_UNIT:-空},应为 3(ns)"
-    info "lidar_type=1 + PointCloud2 时,每点时间取 (timestamp - 帧首)*1e-6 ms;"
-    info "单位设错 → curvature 差 1000 倍 → 逐点补偿的时间轴整体错位(旋转重影就是这个量级)。"
+    fail "timestamp_unit='$TS_UNIT',应为 0(秒)"
+    info "mid360_driver 的 timestamp 字段是 float64 绝对 Unix 秒(offset 16)。"
+    info "point_lio 按 timestamp_unit 把帧内时差缩放到 ms:0→×1e3,3→×1e-6;"
+    info "若仍写 3(ns),curvature 会小 1000 倍 → 逐点 deskew 静默失效(不报错)。"
   fi
 else
-  pass "非 MID-360 PointCloud2 组合,跳过"
+  pass "非 Livox 分支,跳过"
 fi
 
-# ── C3 话题名 ──────────────────────────────────────────────────────────────
-head2 'C3  topic 名一致性'
-if [ "$LID_TOPIC_CFG" = "$LID_TOPIC" ]; then
-  pass "lid_topic=${LID_TOPIC_CFG} 与驱动发布名一致"
+# ── C3 话题名一致性(驱动 vs point_lio) ────────────────────────────────────
+head2 'C3  topic 名一致性(驱动 vs point_lio)'
+if [ -z "$DRV_CFG" ]; then
+  warn "读不到驱动 param.yaml,跳过 topic 对比"
 else
-  fail "lid_topic='${LID_TOPIC_CFG}' 与驱动话题 '${LID_TOPIC}' 不一致"
-  info "驱动固定发 livox/lidar(multi_topic=0 时),见 lddc.cpp:580/659"
-fi
-if [ "$IMU_TOPIC_CFG" = "/livox/imu" ]; then
-  pass "imu_topic=${IMU_TOPIC_CFG}"
-else
-  warn "imu_topic='${IMU_TOPIC_CFG}',驱动发的是 /livox/imu —— 确认是否故意改的"
+  if [ "$DRV_LIDAR_TOPIC" = "$LID_TOPIC_CFG" ]; then
+    pass "lidar 话题一致:$DRV_LIDAR_TOPIC(mid360_driver = point_lio lid_topic)"
+  else
+    fail "lidar 话题不一致:mid360_driver='$DRV_LIDAR_TOPIC',point_lio lid_topic='$LID_TOPIC_CFG'"
+    info "两者必须逐字相同(推荐 /livox/lidar);改 src/mid360_driver/config/param.yaml 或 point_lio yaml。"
+  fi
+  if [ "$DRV_IMU_TOPIC" = "$IMU_TOPIC_CFG" ]; then
+    pass "imu 话题一致:$DRV_IMU_TOPIC(mid360_driver = point_lio imu_topic)"
+  else
+    fail "imu 话题不一致:mid360_driver='$DRV_IMU_TOPIC',point_lio imu_topic='$IMU_TOPIC_CFG'"
+    info "两者必须逐字相同(推荐 /livox/imu)。"
+  fi
 fi
 
-# ── C4 octomap 必须吃机体系点云 ────────────────────────────────────────────
-head2 'C4  octomap 输入(机体系点云 + 单一真相源)'
+# ── C4 host_ip 绑定 + octomap 必须吃机体系点云 ─────────────────────────────
+head2 'C4  host_ip 绑定 与 octomap 输入(机体系点云 + 单一真相源)'
+if [ -z "$HOST_IP" ]; then
+  warn "读不到驱动 param.yaml 的 host_ip(驱动 bind 会失败)"
+elif ! command -v ip >/dev/null 2>&1; then
+  warn "没有 ip 命令,无法核对 host_ip=$HOST_IP 是否属于本机网卡"
+else
+  LOCAL_IPS="$(ip -o -4 addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1)"
+  if printf '%s\n' "$LOCAL_IPS" | grep -qx -- "$HOST_IP"; then
+    pass "host_ip=$HOST_IP 是本机网卡地址"
+  else
+    warn "host_ip=$HOST_IP 不在本机网卡地址中($(printf '%s ' $LOCAL_IPS))"
+    info "驱动只在 host_ip 上 bind UDP 56301/56401;填错会 bind 失败、收不到任何数据。"
+    info "换机器/网卡时改 src/mid360_driver/config/param.yaml 的 host_ip,并重新 build 同步 install。"
+  fi
+fi
 if [ "$BODY_PUB" = "true" ]; then
   pass "scan_bodyframe_pub_en=true,会发 /cloud_registered_body"
 else
@@ -211,18 +229,20 @@ head2 'C5  src / install 一致性(改了 src 没 build 的常见坑)'
 if [ -n "$WS" ]; then
   stale=""
   for pair in \
+    "$WS/src/mid360_driver/config/param.yaml:$WS/install/mid360_driver/share/mid360_driver/config/param.yaml" \
+    "$WS/src/mid360_driver/launch/mid360_driver.launch.py:$WS/install/mid360_driver/share/mid360_driver/launch/mid360_driver.launch.py" \
     "$WS/src/mid360_bringup/config/octomap_mid360.yaml:$WS/install/mid360_bringup/share/mid360_bringup/config/octomap_mid360.yaml" \
     "$WS/src/mid360_bringup/launch/octomap_mid360.launch.py:$WS/install/mid360_bringup/share/mid360_bringup/launch/octomap_mid360.launch.py" \
     "$WS/src/point_lio_ros2/config/mid360.yaml:$WS/install/point_lio/share/point_lio/config/mid360.yaml" ; do
     a="${pair%%:*}"; b="${pair##*:}"
     if [ -f "$a" ] && [ -f "$b" ] && ! cmp -s "$a" "$b"; then
       stale="$stale
-        $(basename "$a")"
+        $a"
     fi
   done
   if [ -n "$stale" ]; then
     warn "src 与 install 里的副本不一致(运行时读的是 install):$stale"
-    info "跑 colcon build --packages-select mid360_bringup point_lio 同步"
+    info "跑 colcon build --packages-select mid360_driver mid360_bringup point_lio 同步"
   else
     pass "关心的配置在 src 与 install 中一致"
   fi
@@ -282,11 +302,7 @@ if [ "$RUNTIME" = 1 ]; then
   if ! command -v ros2 >/dev/null 2>&1; then
     fail "找不到 ros2 命令(先 source /opt/ros/<distro>/setup.bash)"
   else
-    case "${XFER:-0}" in
-      0) EXPECT_TYPE="sensor_msgs/msg/PointCloud2" ;;
-      1) EXPECT_TYPE="livox_ros_driver2/msg/CustomMsg" ;;
-      *) EXPECT_TYPE="" ;;
-    esac
+    EXPECT_TYPE="sensor_msgs/msg/PointCloud2"
     printf '        等待 %s(最多 %ss)…\n' "$LID_TOPIC" "$TIMEOUT"
     t=0
     while [ "$t" -lt "$TIMEOUT" ]; do
@@ -294,15 +310,15 @@ if [ "$RUNTIME" = 1 ]; then
       sleep 1; t=$((t + 1))
     done
     if ! timeout 5 ros2 topic list 2>/dev/null | grep -qx -- "$LID_TOPIC"; then
-      fail "$LID_TOPIC 在 ${TIMEOUT}s 内没出现(驱动没起来?topic 名不对?)"
+      fail "$LID_TOPIC 在 $TIMEOUT s 内没出现(驱动没起来?topic 名不对?)"
     else
       ACT_TYPE="$(timeout 10 ros2 topic info -v "$LID_TOPIC" 2>/dev/null \
                   | grep -m1 -E '^(Topic )?Type:' | awk '{print $NF}')"
       if [ -z "$ACT_TYPE" ]; then
         warn "拿不到 $LID_TOPIC 的类型(还没 publisher?)"
-      elif [ -n "$EXPECT_TYPE" ] && [ "$ACT_TYPE" != "$EXPECT_TYPE" ]; then
-        fail "$LID_TOPIC 实际是 $ACT_TYPE,xfer_format=${XFER} 期望 $EXPECT_TYPE"
-        info "这就是 point_lio 静默收不到点云的经典原因;改 xfer_format 或改 point_lio 订阅类型。"
+      elif [ "$ACT_TYPE" != "$EXPECT_TYPE" ]; then
+        fail "$LID_TOPIC 实际是 $ACT_TYPE,mid360_driver 固定发 $EXPECT_TYPE"
+        info "检查驱动是否真的启动、参数是否正确;订阅类型错配时 point_lio 会静默收不到点云。"
       else
         pass "$LID_TOPIC 类型 = $ACT_TYPE"
       fi
@@ -312,7 +328,16 @@ if [ "$RUNTIME" = 1 ]; then
     if [ "$IACT" = "sensor_msgs/msg/Imu" ]; then
       pass "/livox/imu 类型 = $IACT"
     else
-      fail "/livox/imu 类型 = ${IACT:-拿不到},应为 sensor_msgs/msg/Imu"
+      fail "/livox/imu 类型 = $IACT(为空=没读到),应为 sensor_msgs/msg/Imu"
+    fi
+    if command -v ss >/dev/null 2>&1; then
+      PORTS="$(ss -lunp 2>/dev/null | grep -E ':(56301|56401)\b' || true)"
+      if [ -n "$PORTS" ]; then
+        pass "UDP 56301/56401 已绑定(驱动正在收流)"
+        printf '%s\n' "$PORTS" | sed 's/^/        /'
+      else
+        info "UDP 56301/56401 当前未被占用(若在 launch 前执行属正常)"
+      fi
     fi
   fi
 fi

@@ -1,0 +1,11 @@
+mid360_driver:
+    ros__parameters:
+        lidar_topic: /livox/lidar
+        lidar_frame: livox_frame
+        imu_topic: /livox/imu
+        imu_frame: imu_frame
+        lidar_publish_time_interval: 0.1
+        # 注意:host_ip 必须等于【本机接雷达那块网卡】的 IPv4 地址(不是雷达的 IP)。
+        # 驱动在该地址上 bind UDP 56301/56401 被动收流;填错/换机器 → bind 失败,收不到数据。
+        host_ip: 192.168.1.50
+        is_topic_name_with_lidar_ip: false # 是否在话题名后面加雷达ip，可以用于区分多个雷达

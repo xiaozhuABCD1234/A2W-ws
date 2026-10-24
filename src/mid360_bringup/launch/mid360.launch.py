@@ -7,6 +7,10 @@
 
 point_lio 的 rviz 固定关掉;rviz 由本 launch 直接起。
 
+驱动换成本地包 mid360_driver:它直接 UDP 收流并发布 /livox/lidar
+(sensor_msgs/PointCloud2)与 /livox/imu(sensor_msgs/Imu),没有
+livox_ros_driver2 的 xfer_format 选项(点云恒为 PointCloud2)。
+
 ⚠️ 参数名用 `show_rviz` 而不是 `rviz` 的原因:
 launch 的 IncludeLaunchDescription 会把 include 参数展开成
 SetLaunchConfiguration 写进**共享**的 launch_configurations(见
@@ -17,10 +21,11 @@ LaunchConfiguration('rviz') 的节点条件全变假。改名后互不干扰。
 注:一键模式下分辨率/量程等调参在 octomap_mid360.launch.py 那层做,
 本 launch 不转发(避免同类问题)。
 
-启动前会先跑 scripts/preflight.sh 做一次静态自检(xfer_format 与
-lidar_type 是否匹配、timestamp_unit、话题名、octomap 是否吃机体系点云、
-src 是否忘了 build)。不通过则直接拒绝启动 —— 因为这类错配的现场表现是
-“节点都起来了,但 rviz 里永远没有点”,靠日志很难定位。
+启动前会先跑 scripts/preflight.sh 做一次静态自检(mid360_driver 的
+PointCloud2/Imu 与 point_lio 的 lidar_type/timestamp_unit 是否匹配、
+话题名、host_ip、octomap 是否吃机体系点云、src 是否忘了 build)。
+不通过则直接拒绝启动 —— 因为这类错配的现场表现是“节点都起来了,
+但 rviz 里永远没有点”,靠日志很难定位。
 临时跳过:MID360_SKIP_PREFLIGHT=1 ros2 launch ...
 """
 
@@ -92,8 +97,8 @@ def generate_launch_description():
 
     driver = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([
-            FindPackageShare('livox_ros_driver2'),
-            'launch_ROS2', 'msg_MID360_launch.py',
+            FindPackageShare('mid360_driver'),
+            'launch', 'mid360_driver.launch.py',
         ]))
     )
 
