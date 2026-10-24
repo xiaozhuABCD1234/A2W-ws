@@ -878,7 +878,15 @@ class BackendNode : public rclcpp::Node {
       }
 
       geometry_msgs::msg::TransformStamped tf_msg = tf2::eigenToTransform(correction);
-      tf_msg.header.stamp = toRosTime(stamp);
+      // TF 用**墙钟**打戳，不用传感器时戳。原因（实测）：
+      // point_lio 先发 /cloud_registered(T) 再发 odom(T)，而 map->camera_init 的
+      // 内容只来自 odom，所以按 odom 打戳时，任何 frame=camera_init 的显示在收到
+      // 点云的那一刻，TF 缓冲里最新只到 T-100ms →
+      //   "Lookup would require extrapolation into the future"
+      // rviz 的 message filter 要等下一帧 TF 才能补上，状态栏就一直挂着红字。
+      // 用 now() 打戳后，点云时刻 T 落在 [now-50ms, now] 的插值窗口内，一次就能查到。
+      // map->camera_init 是缓变纠偏量，用墙钟打戳也是常规做法（雷达与主机时钟已同步）。
+      tf_msg.header.stamp = now();
       tf_msg.header.frame_id = params_.world_frame;
       tf_msg.child_frame_id = params_.odom_frame;
       tf_broadcaster_->sendTransform(tf_msg);

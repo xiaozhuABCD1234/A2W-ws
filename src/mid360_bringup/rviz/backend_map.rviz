@@ -51,25 +51,17 @@ Visualization Manager:
       Topic:
         Value: /backend/loop_markers
 
-    # point_lio 原始世界系点云(与 map 系初始重合,回环后会看到漂移)
-    - Class: rviz_default_plugins/PointCloud2
-      Name: cloud_registered
-      Enabled: false
-      Topic:
-        Value: /cloud_registered
-      Style: Points
-      Size (Pixels): 2
-      Color Transformer: FlatColor
-      Color: 80; 220; 80
-
-    # 原始轨迹
-    - Class: rviz_default_plugins/Path
-      Name: path_raw
-      Enabled: false
-      Topic:
-        Value: /path
-      Color: 255; 80; 80
-      Buffer Length: 1
+    # 注意:这里**故意不再放** /cloud_registered(frame=camera_init)与 /path。
+    # Fixed Frame 是 map 时,这类 camera_init 系的显示每个都要 map->camera_init,
+    # 而 point_lio 先发点云、后发 odom,点云到达那一刻 TF 还没追上,rviz 状态栏就
+    # 一直挂着 "Could not transform from [camera_init] to [map]"(实测)。
+    # map 系对应的东西已经有 /backend/map_points + /backend/path;
+    # 真要对照原始点云,把下面这段取消注释即可(它是 map 系,不需要额外 TF):
+    #   - Class: rviz_default_plugins/PointCloud2
+    #     Name: cloud_registered
+    #     Enabled: true
+    #     Topic: {Value: /cloud_registered}
+    # 或者直接把 Fixed Frame 改成 camera_init 再用旧配置 octomap_mid360.rviz。
 
     # octomap(map 系,后端启用时)
     - Class: octomap_rviz_plugins/OccupancyGrid
