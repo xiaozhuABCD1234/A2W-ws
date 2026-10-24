@@ -1,9 +1,31 @@
+import os
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, GroupAction, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+
+
+def _clean_ld_library_path():
+    """LOCAL PATCH P11(见 docs/PATCHES.md):剔除 /opt/MVS 的旧 libusb。
+
+    本机 ~/.bashrc 把 /opt/MVS/lib/64 放在 LD_LIBRARY_PATH 最前面,里面的
+    libusb-1.0.so.0 缺少 libusb_set_option;而系统 libpcl_io.so.1.14 依赖该符号,
+    于是 pointlio_mapping 启动即 `symbol lookup error` 并 exit 127(rviz 随后报
+    Frame [camera_init] does not exist)。只对 laserMapping 进程剔除这条路径,
+    不影响需要 MVS 相机的其他节点。
+    """
+    raw = os.environ.get('LD_LIBRARY_PATH', '')
+    paths = [p for p in raw.split(':') if p]
+    kept = [p for p in paths if '/opt/MVS' not in p]
+    if len(kept) == len(paths):
+        return {}
+    print('[mapping_mid360] LOCAL PATCH P11: LD_LIBRARY_PATH 含 /opt/MVS'
+          '(旧 libusb 会破坏 PCL),已为 laserMapping 剔除该路径')
+    return {'LD_LIBRARY_PATH': ':'.join(kept) if kept
+            else '/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu'}
 
 
 def _laser_mapping_node(context):
@@ -53,12 +75,16 @@ def _laser_mapping_node(context):
         laser_mapping_params.append(
             {'pcd_save': {'pcd_save_en': raw in ('true', '1', 'yes', 'on')}})
 
+    # LOCAL PATCH P11:清理 LD_LIBRARY_PATH(见 _clean_ld_library_path)
+    extra_env = _clean_ld_library_path()
+
     return [Node(
         package='point_lio',
         executable='pointlio_mapping',
         name='laserMapping',
         output='screen',
         parameters=laser_mapping_params,
+        additional_env=extra_env,
         # prefix='gdb -ex run --args'
     )]
 

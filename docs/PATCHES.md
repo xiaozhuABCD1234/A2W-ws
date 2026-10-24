@@ -33,6 +33,7 @@ rviz 里永远没有点云（历史上的 livox `xfer_format` 错配就是这样
 | **P8** | `src/point_lio_ros2/src/laserMapping.cpp`<br>（两个落盘点：`:568` 分片、`:1360` 退出时；另有 `main` 里的 `mkdir("PCD")`） | `string(ROOT_DIR) + "PCD/..."` → `"PCD/..."`：改用**相对路径**，即**运行 `ros2 launch` 那个目录**下的 `PCD/`；并在启动时 `mkdir("PCD", 0755)` 一次（已存在 = `EEXIST`，不算错；建不了会打印 `[pcd_save] mkdir PCD 失败(...)`，否则失败是静默的） | 上游把路径编译期烧死成 `ROOT_DIR`（= 构建时的源码绝对路径，`CMakeLists.txt:13`）：工作空间一换目录/换机器就得重新 `colcon build`，产物还落在源码树里。PCL 的 `savePCDFileBinary` 不自建目录（上游靠 `PCD/temp.txt` 占位，相对路径下那个占位文件不起作用），所以补了 mkdir。`pcd_view.launch.py` 的默认文件路径同步改成 `./PCD/scans.pcd` | 上游行为见 `laserMapping.cpp:1360` |
 | **P9** | `src/point_lio_ros2/config/mid360.yaml` | `timestamp_unit: 3 → 0`（秒） | `mid360_driver` 的每点 `timestamp` 是**绝对 Unix 秒**；若仍按 3（ns）换算，`curvature` 会小 1000 倍，逐点 deskew 的时间轴整体错位（旋转重影的量级） | 上游/旧驱动的点时间是 ns，所以原配置是 3；换驱动必须同步改 |
 | **P10** | `src/point_lio_ros2/config/mid360.yaml` | `mapping.acc_norm: 1.0 → 9.81` | 旧 `livox_ros_driver2` 发的 IMU 加速度是 **g**（`pub_handler.cpp` 直接拷 `imu->acc_x`），所以上游用 1.0；`mid360_driver` 发的是 **m/s²**（发布前乘 9.81）。point_lio 代码里是 `acc * G_m_s2 / acc_norm`，若仍用 1.0，所有加速度会被再放大 9.81 倍 → 重力/速度估计系统性失真（静止场景可能不明显，一动就飘） | 上游默认 1.0（对应 g）；换驱动必须同步改，`preflight.sh` 的 C2 会拦 |
+| **P11** | `src/point_lio_ros2/launch/mapping_mid360.launch.py` | `_clean_ld_library_path()`：给 `laserMapping` 节点设 `additional_env`，把 `LD_LIBRARY_PATH` 里的 `/opt/MVS` 路径剔除（其余路径保留） | 本机 `~/.bashrc` 把 `/opt/MVS/lib/64` 放在 `LD_LIBRARY_PATH` 最前，其中的旧 `libusb-1.0.so.0` 缺 `libusb_set_option`；系统 `libpcl_io.so.1.14` 需要它 → `pointlio_mapping` 启动即 `symbol lookup error`，exit 127，rviz 随后报 `Frame [camera_init] does not exist`。只影响 laserMapping，不影响用 MVS 相机的节点 | 上游无此逻辑；MVS SDK 更新到带新 libusb 后可删掉 |
 | **M1** | `src/mid360_driver/src/asio_compat.hpp`（新增）<br>`src/mid360_driver/src/` 下各 `#include <asio.hpp>`<br>`src/mid360_driver/package.xml` | 新增 `asio_compat.hpp`：include `<boost/asio.hpp>`，并把 `asio` 命名空间转发到 `boost::asio`（含 `error_code` 别名）；源码里的 `#include <asio.hpp>` 改为 `#include "asio_compat.hpp"`；`package.xml` 的依赖 `asio` 改为 `boost` | 本机没有 `libasio-dev` 且无法 sudo；Boost.Asio 与独立 Asio API 兼容，改头文件即可 | 上游原版需要 `libasio-dev`。换机器若想回上游原版，删掉 M1、装回 `libasio-dev` 即可 |
 | **M2** | `src/mid360_driver/config/param.yaml` | `host_ip: 192.168.1.50`（本机接雷达网卡 `enp5s0` 的地址）；`lidar_topic` / `imu_topic` 保持 `/livox/lidar` / `/livox/imu` | 驱动只在本机 `host_ip` 上监听 UDP 56301/56401，被动等雷达推流；换机器/网卡必须同步改，否则收不到数据 | 上游默认也是 `192.168.1.50`（示例值）；真正生效的是本地这份配置 |
 | **S1** | 仓库结构 | 上游包扁平化进 `src/`（现为 `mid360_driver` + `point_lio_ros2`）；移除 point_lio 上游遗留的失效 `.gitmodules` / 子模块（`3rdparty/IKFoM`、`ikd-Tree` 直接入库） | 便于单工作空间一次 `colcon build`，避免嵌套仓库的 submodule 同步问题 | commit `8635063`、`8938f25` |
@@ -67,7 +68,7 @@ rviz 里永远没有点云（历史上的 livox `xfer_format` 错配就是这样
 ```bash
 cd ~/Projects/A2W-ws
 
-# 1) point_lio 差异应该只剩本清单列出的那些文件(P1/P2/P4/P5/P7/P8/P9/P10 + 上游自带的 .gitmodules)
+# 1) point_lio 差异应该只剩本清单列出的那些文件(P1/P2/P4/P5/P7/P8/P9/P10/P11 + 上游自带的 .gitmodules)
 diff -rq src/point_lio_ros2 ~/Downloads/point_lio_ros2_upstream
 
 # 2) mid360_driver 与上游本地 clone 对比(若有;本地 clone 见 §1)

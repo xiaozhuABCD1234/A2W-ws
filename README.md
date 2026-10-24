@@ -314,8 +314,11 @@ git -C ~/Projects/mid360_driver log --oneline
 - 本机默认 shell 是 **zsh**。ROS 的 `setup.bash` 是 bash 专用模板，zsh 下会因
   `BASH_SOURCE` 为空而去当前目录找 `setup.sh` 报 `127`，请一律用 `setup.zsh`。
 - 若 `pointlio_mapping` 启动即报 `symbol lookup error: libpcl_io.so... undefined symbol:
-  libusb_set_option`，检查 `LD_LIBRARY_PATH` 是否含 `/opt/MVS/lib/64`（相机 SDK 自带的旧
-  `libusb-1.0.so.0` 抢先被加载）。启动前把它从 `LD_LIBRARY_PATH` 里剔除即可。
+  libusb_set_option`，那是 `~/.bashrc` 把 `/opt/MVS/lib/64` 放进 `LD_LIBRARY_PATH`
+  （相机 SDK 自带的旧 `libusb-1.0.so.0` 抢先被加载）导致的。`mapping_mid360.launch.py`
+  已加 **P11** 自动剔除该路径并打印提示；若你直接跑 `pointlio_mapping` 二进制，仍需自己
+  `export LD_LIBRARY_PATH=$(echo $LD_LIBRARY_PATH | tr ':' '\n' | grep -v /opt/MVS | paste -sd:)`。
+  这个错误会让 point_lio 进程 exit 127，rviz 紧接着报 `Frame [camera_init] does not exist`。
 - `src/point_lio_ros2/image/` 共 246MB 演示 GIF（最大单个 89.6MB），已从 `.gitignore` 中排除。
 - `src/point_lio_ros2/Log/{pos_log,mat_out,imu_pbp}.txt` 是运行时被清零覆写的产物，已忽略。
 - `src/point_lio_ros2/include/IKFoM/` 下 3 个 `.vscode/settings.json`（上游跟踪的 IDE 配置）
