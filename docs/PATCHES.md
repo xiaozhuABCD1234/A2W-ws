@@ -19,6 +19,7 @@ rviz 里永远没有点云（历史上的 livox `xfer_format` 错配就是这样
 | `point_lio_ros2`（对照参考） | `github.com/hku-mars/Point-LIO`（ROS1 官方） | 本地快照 | 本地 `~/Downloads/Point-LIO_ros1_official`，写补丁时以它为准 |
 | `mid360_driver` | `github.com/Yancey2023/mid360_driver`（upstream/main `e2ba0ca`） | 本地 fork `xiaozhuABCD1234/mid360_driver` 的 `4adf8df`（`add mid70 driver`，含 Mid-70 支持） | MIT，作者 Yingjie Huang；本地 `~/Projects/mid360_driver` |
 | `mid360_bringup` | — | — | **本项目自有代码，不是 fork**，不受本清单约束 |
+| `point_lio_backend` | — | — | **本项目自有代码**（回环检测 + Ceres 位姿图 + map 系纠偏），不修改任何 vendored 包，不受本清单约束 |
 
 ## 2. 补丁清单
 
@@ -62,6 +63,7 @@ rviz 里永远没有点云（历史上的 livox `xfer_format` 错配就是这样
 | **B** | vendored 代码（`point_lio_ros2`、`mid360_driver`）**只允许最小就地补丁 + `LOCAL PATCH` 标记**，不做架构改造（不引入插件注册表等） | 已立规 | 每次同步上游都要三方合并；架构改造会让同步成本失控。抽象应该放在自己的边界（`mid360_bringup`）上 |
 | **C** | 启动前跑 `scripts/preflight.sh` 静态自检，不自洽就拒绝启动 | 已做（`mid360.launch.py` 在 `generate_launch_description` 阶段同步调用） | 本链路最危险的失败是"静默 0 点云"而不是崩溃。该脚本会检查：驱动 `config/param.yaml` / `launch` 是否存在、`lidar_topic` / `imu_topic` 与 point_lio 是否一致、`host_ip` 是否为本机网卡地址、`lidar_type=1`、`timestamp_unit=0`、P1 是否在位（grep `livox_handler` / `PointCloud2ConstIterator`）、octomap 是否吃机体系点云、`src` 改了是否忘了 `colcon build`。**不再检查 `xfer_format`**（驱动已换）。跳过：`MID360_SKIP_PREFLIGHT=1` |
 | **D** | 调参期把数据落盘（`pcd_save_en` / `runtime_pos_log_enable`），便于事后复现 | **部分做**：`pcd_save_en: true`（P6），并可由 launch 参数 `pcd_save` 传 `true` / `false` 临时开关（P7）；`runtime_pos_log_enable` 仍为 false —— 且它被 `mapping_mid360.launch.py` 的参数字典**盖住**（见 P5），要改必须改 launch | `Log/*.txt` 每次启动清零，重影/漂移这类问题没有原始数据就只能靠现场盯屏 |
+| **E** | 回环/位姿图等"后端"能力放在**自有包** `point_lio_backend`，只订阅前端话题（`/aft_mapped_to_init`、`/cloud_registered_body`），不向 vendored 包加钩子；后端启用时世界系统一为 `map`，由后端发布 `map→camera_init` | 已做（`backend:=true` 默认） | 保持 `point_lio_ros2` / `mid360_driver` 同步上游零成本（约定 B 的延伸）；`backend:=false` 时完全退回 `camera_init` 系 |
 
 ## 4. 同步上游时的流程
 
@@ -84,6 +86,8 @@ grep -n "timestamp_unit" src/point_lio_ros2/config/mid360.yaml    # 必须是 0
 
 # 5) 确认无误后重建(install/ 是拷贝,不是软链,不 build 不生效)
 colcon build
+# 注意:point_lio_backend 是自有包,不在上面的 diff 范围;它依赖的接口只有
+# /aft_mapped_to_init 与 /cloud_registered_body,同步上游后不需要改它,但仍要重新 build。
 ```
 
 第 1 步的**期望输出**（多出来的文件说明上游改过或补丁丢了，需要人工判断）：

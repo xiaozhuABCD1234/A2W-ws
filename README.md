@@ -314,7 +314,7 @@ python3 src/point_lio_backend/test/integration/synthetic_loop_replay.py --mode s
 
 ### 与上游的差异
 
-本工作空间对两个上游包做过实质改造，这是本仓库存在的主要价值：
+本工作空间对两个上游包做过实质改造，并新增了自有后端包，这是本仓库存在的主要价值：
 
 ### mid360_driver
 上游：`https://github.com/Yancey2023/mid360_driver`（upstream/main `e2ba0ca`，MIT，作者 Yingjie Huang）。
@@ -349,6 +349,17 @@ python3 src/point_lio_backend/test/integration/synthetic_loop_replay.py --mode s
   `timestamp_unit` 由 `3`（ns）改为 `0`（秒，P9），与 `mid360_driver` 的点时间一致；
   `mapping.acc_norm` 由 `1.0`（g）改为 `9.81`（m/s²，P10），因为 `mid360_driver` 发布 IMU
   前已把原始 g 值乘 9.81（旧 `livox_ros_driver2` 直接发 g）。
+
+### point_lio_backend（**本仓库新增包**，非上游）
+
+独立在线后端：Scan Context 回环检测 + GICP 校验 + Ceres 6-DOF 位姿图，输入只订阅
+`/aft_mapped_to_init` 与 `/cloud_registered_body`，输出 `map` 系纠偏 TF / 轨迹 / 点云
+（详见 README「后端优化」一节与 `docs/BACKEND_SPEC.md`）。
+
+- **不改任何 vendored 源码**：point_lio 与 mid360_driver 的 diff 仍只有 P1~P11 / M1~M2。
+- `backend:=true`（默认）时 octomap / rviz 使用 `map` 系；`backend:=false` 时完全退回
+  `camera_init` 系。
+- 依赖：Ceres 2.2（系统 `libceres-dev`，已装）、PCL、Eigen、tf2_eigen；不需要 GTSAM。
 
 ### mid360_bringup（**本仓库新增包**，非上游）
 

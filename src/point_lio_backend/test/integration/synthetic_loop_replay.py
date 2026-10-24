@@ -200,8 +200,8 @@ class Harness(Node):
 
 
 def publish_frame(node, stamp, raw_pose, gt_pose, world_pts, tree, args):
-    # 当前位姿可见的世界点
-    idx = tree.query_ball_point(raw_pose[:3, 3] * 0 + gt_pose[:3, 3], args.range_m, workers=-1)
+    # 用真值位置取可见世界点（漂移只体现在 odom 里，扫描本身是真实观测）
+    idx = tree.query_ball_point(gt_pose[:3, 3], args.range_m, workers=-1)
     if len(idx) < 100:
         return
     pts = world_pts[np.asarray(idx)]
@@ -322,7 +322,7 @@ def main():
     parser.add_argument('--loop-size', type=float, default=7.0)
     parser.add_argument('--center-x', type=float, default=-6.5)
     parser.add_argument('--center-y', type=float, default=-4.0)
-    parser.add_argument('--straight-length', type=float, default=12.0)
+    parser.add_argument('--straight-length', type=float, default=8.0)
     parser.add_argument('--range-m', type=float, default=15.0)
     parser.add_argument('--max-points', type=int, default=4000)
     parser.add_argument('--keep-backend', action='store_true')
