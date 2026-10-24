@@ -60,6 +60,10 @@ def _octomap_node(context):
     ]).perform(context)]
 
     override = {}
+    # frame_id 默认空 = 用 yaml 的 camera_init；backend 开启时由上层 launch 传 map。
+    frame_override = context.perform_substitution(LaunchConfiguration('frame_id')).strip()
+    if frame_override:
+        override['frame_id'] = frame_override
     for arg_name, (param_name, cast) in OVERRIDABLE.items():
         raw = context.perform_substitution(LaunchConfiguration(arg_name)).strip()
         if not raw:
@@ -100,14 +104,23 @@ def generate_launch_description():
         description='射线截断距离 [m]。留空 = 用 config/octomap_mid360.yaml 里的值;'
                     '显式传参才覆盖。越大 CPU/内存越高,也越容易在远处出重影')
 
+    frame_id_arg = DeclareLaunchArgument(
+        'frame_id', default_value='',
+        description='世界系。留空 = 用 config/octomap_mid360.yaml 的 camera_init;'
+                    '后端启用时上层传 map(map->camera_init 由 point_lio_backend 发布)')
+
+    rviz_config_arg = DeclareLaunchArgument(
+        'rviz_config', default_value=PathJoinSubstitution([
+            FindPackageShare('mid360_bringup'), 'rviz', 'octomap_mid360.rviz'
+        ]),
+        description='rviz 配置文件。后端启用时上层传 rviz/backend_map.rviz(Fixed Frame: map)')
+
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
         name='rviz2',
         output='screen',
-        arguments=['-d', PathJoinSubstitution([
-            FindPackageShare('mid360_bringup'), 'rviz', 'octomap_mid360.rviz'
-        ])],
+        arguments=['-d', LaunchConfiguration('rviz_config')],
         # 关键:octomap_rviz_plugins 2.1.0 的 .so 编译时没把 liboctomap 写进
         # DT_NEEDED,而 rviz2 自己又不加载 octomap → dlopen 插件时符号解析失败
         # (undefined symbol: _ZTIN7octomap13OcTreeStampedE),OccupancyGrid 显示
@@ -127,6 +140,8 @@ def generate_launch_description():
         rviz_arg,
         resolution_arg,
         max_range_arg,
+        frame_id_arg,
+        rviz_config_arg,
         OpaqueFunction(function=_octomap_node),
         rviz_node,
     ])

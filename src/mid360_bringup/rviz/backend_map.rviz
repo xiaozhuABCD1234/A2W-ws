@@ -1,0 +1,111 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+    CurrentViewClass: rviz_default_plugins/Orbit
+    Views:
+      - Class: rviz_default_plugins/Orbit
+        Name: Orbit
+        Distance: 10
+        Focal Point:
+          X: 0
+          Y: 0
+          Z: 0
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Plane: XY
+      Plane Cell Count: 20
+      Cell Size: 1
+      Color: 160; 160; 164
+      Line Style: Lines
+
+    # 后端优化后的全局地图(map 系,回环纠偏后重发)
+    - Class: rviz_default_plugins/PointCloud2
+      Name: backend_map
+      Enabled: true
+      Topic:
+        Value: /backend/map_points
+      Style: Points
+      Size (Pixels): 1
+      Color Transformer: FlatColor
+      Color: 0; 200; 255
+
+    # 后端优化后的轨迹(map 系)
+    - Class: rviz_default_plugins/Path
+      Name: backend_path
+      Enabled: true
+      Topic:
+        Value: /backend/path
+      Color: 80; 255; 120
+      Buffer Length: 1
+
+    # 回环边 + 关键帧位置
+    - Class: rviz_default_plugins/MarkerArray
+      Name: backend_loops
+      Enabled: true
+      Topic:
+        Value: /backend/loop_markers
+
+    # point_lio 原始世界系点云(与 map 系初始重合,回环后会看到漂移)
+    - Class: rviz_default_plugins/PointCloud2
+      Name: cloud_registered
+      Enabled: false
+      Topic:
+        Value: /cloud_registered
+      Style: Points
+      Size (Pixels): 2
+      Color Transformer: FlatColor
+      Color: 80; 220; 80
+
+    # 原始轨迹
+    - Class: rviz_default_plugins/Path
+      Name: path_raw
+      Enabled: false
+      Topic:
+        Value: /path
+      Color: 255; 80; 80
+      Buffer Length: 1
+
+    # octomap(map 系,后端启用时)
+    - Class: octomap_rviz_plugins/OccupancyGrid
+      Name: OctomapGrid
+      Enabled: false
+      Topic:
+        Value: /octomap_binary
+      Voxel Rendering: Occupied Voxels
+      Voxel Coloring: Z-Axis
+      Voxel Alpha: 0.9
+      Max. Octree Depth: 16
+
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Octomap_fallback_points
+      Enabled: true
+      Topic:
+        Value: /octomap_point_cloud_centers
+      Style: Points
+      Size (Pixels): 3
+      Color Transformer: FlatColor
+      Color: 255; 140; 0
+
+    # 坐标系:map -> camera_init(后端) -> body(point_lio)
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Frame Timeout: 15
+      Marker Scale: 1
+
+  Global Options:
+    Fixed Frame: map
+    Background Color: 20; 20; 20
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/Measure
+  Window Geometry:
+    Width: 1280
+    Height: 800
