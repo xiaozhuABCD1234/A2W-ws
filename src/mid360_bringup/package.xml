@@ -4,8 +4,9 @@
   <name>mid360_bringup</name>
   <version>0.1.0</version>
   <description>
-    Mid-360 + Point-LIO 的周边集成(Mid-360 / Point-LIO 均为本仓库内的本地上游包)。
-    目前包含:Point-LIO 点云 → octomap 三维占据栅格。
+    Mid-360 + Point-LIO 的周边集成(Mid-360 驱动 / Point-LIO 均为本仓库内的本地上游包)。
+    目前包含:本地 mid360_driver(UDP 被动收流 → PointCloud2/Imu)、
+    Point-LIO 点云 → octomap 三维占据栅格。
     本包只放 launch / config,不含编译产物。
   </description>
   <maintainer email="xiaozhuABCD1234@163.com">xiaozhu</maintainer>
@@ -21,7 +22,7 @@
 
   <!-- 被集成的节点 -->
   <exec_depend>point_lio</exec_depend>
-  <exec_depend>livox_ros_driver2</exec_depend>
+  <exec_depend>mid360_driver</exec_depend>
   <exec_depend>pcl_ros</exec_depend>
   <exec_depend>octomap_server</exec_depend>
   <exec_depend>octomap_msgs</exec_depend>
