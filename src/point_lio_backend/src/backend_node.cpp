@@ -851,6 +851,21 @@ class BackendNode : public rclcpp::Node {
         has_odom = has_odom_;
       }
       if (!has_odom) {
+        // 关键：还没收到前端位姿时也要发 TF，而且是**单位阵**。
+        // map 系的定义就是"锚定在第一个关键帧的 camera_init"，所以此刻
+        // map == camera_init 恒成立。不发的话，rviz / octomap_server 会一直报
+        //   Could not transform from [camera_init] to [map]
+        // —— point_lio 的 IMU 初始化要几秒，用户看到的第一个红字就是这个。
+        geometry_msgs::msg::TransformStamped identity;
+        identity.header.stamp = now();
+        identity.header.frame_id = params_.world_frame;
+        identity.child_frame_id = params_.odom_frame;
+        identity.transform.rotation.w = 1.0;
+        tf_broadcaster_->sendTransform(identity);
+        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000,
+                             "尚未收到 %s；先发单位 TF map->camera_init。"
+                             "若持续出现，检查 point_lio 是否初始化(%s 是否有点云)",
+                             params_.odom_topic.c_str(), params_.cloud_topic.c_str());
         return;
       }
 
