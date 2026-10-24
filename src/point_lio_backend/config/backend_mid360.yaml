@@ -35,6 +35,9 @@
     scan_context.top_candidates: 5
     scan_context.min_index_gap: 20
     scan_context.min_time_gap_sec: 10.0
+    # 累计行程下限：静止时 SC 会不断匹配早期关键帧，产生"原地不动"的假回环
+    # （纠偏量≈0，无害但会刷屏 /backend/status 的 loops）。真实回环至少要走过这段路。
+    scan_context.min_travel_m: 3.0
 
     # ── GICP 校验 ─────────────────────────────────────────────────────────
     icp.coarse_correspondence: 2.0

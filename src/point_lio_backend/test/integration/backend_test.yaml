@@ -28,6 +28,7 @@
     scan_context.top_candidates: 8
     scan_context.min_index_gap: 12
     scan_context.min_time_gap_sec: 5.0
+    scan_context.min_travel_m: 2.0
 
     icp.coarse_correspondence: 2.5
     icp.max_correspondence: 1.0

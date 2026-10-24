@@ -176,6 +176,9 @@ TEST(ScanContext, RingKeyDistanceEdgeCases) {
 
 TEST(LoopDetector, DetectsRotatedRevisit) {
   ScanContextParams sc_params = defaultParams();
+  // 本用例只验证几何链路（SC 航向 → GICP），历史只有 1 帧、行程为 0，
+  // 必须关掉行程门限；门限行为见 RejectsStationarySelfMatch。
+  sc_params.min_travel_m = 0.0;
   IcpParams icp_params;
   ScanContext sc(sc_params);
 
@@ -217,6 +220,7 @@ TEST(LoopDetector, DetectsRotatedRevisit) {
 
 TEST(LoopDetector, DetectsWithDriftedInitialPose) {
   ScanContextParams sc_params = defaultParams();
+  sc_params.min_travel_m = 0.0;  // 同上：验证几何与大漂移收敛，不验证行程门限
   IcpParams icp_params;
   ScanContext sc(sc_params);
 
@@ -296,4 +300,41 @@ TEST(ScanContext, InvalidDescriptorDistance) {
   const Eigen::MatrixXd b = Eigen::MatrixXd::Zero(10, 60);
   EXPECT_EQ(sc.distance(a, b), std::numeric_limits<double>::max());
   EXPECT_EQ(sc.distance(a, a), std::numeric_limits<double>::max());
+}
+
+// 静止/原地打转时，SC 会不断匹配到早期关键帧；若不设行程下限，就会刷出
+// 一堆"位移恒等"的假回环（真机静止实测过）。这里验证门限确实拦住了它。
+TEST(LoopDetector, RejectsStationarySelfMatch) {
+  ScanContextParams sc_params = defaultParams();
+  sc_params.min_travel_m = 3.0;
+  IcpParams icp_params;
+  ScanContext sc(sc_params);
+
+  const PointCloudT room = makeRoom(2000, 2000);
+
+  Keyframe history;
+  history.id = 0;
+  history.stamp = 0.0;
+  history.pose_opt = Eigen::Isometry3d::Identity();
+  history.cloud = PointCloudT::Ptr(new PointCloudT(room));
+  history.descriptor = sc.describe(room);
+  history.ring_key = sc.ringKey(history.descriptor);
+
+  Keyframe current;
+  current.id = 40;
+  current.stamp = 30.0;
+  current.pose_opt = Eigen::Isometry3d::Identity();  // 原地不动
+  current.cloud = PointCloudT::Ptr(new PointCloudT(room));
+  current.descriptor = sc.describe(room);
+  current.ring_key = sc.ringKey(current.descriptor);
+
+  LoopDetector detector(sc_params, icp_params);
+  const std::vector<Keyframe> hist{history};
+  EXPECT_FALSE(detector.detect(current, hist).has_value());
+
+  // 走过足够路程后，同样的观测才允许闭环。
+  Keyframe moved = current;
+  moved.id = 41;
+  moved.pose_opt.translation() = Eigen::Vector3d(4.0, 0.0, 0.0);
+  EXPECT_TRUE(detector.detect(moved, hist).has_value());
 }

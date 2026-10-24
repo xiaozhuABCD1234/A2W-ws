@@ -274,7 +274,8 @@ ros2 launch point_lio_backend backend_mid360.launch.py
 
 ### 验收（绕一圈）
 
-1. 起步后 `ros2 topic echo /backend/status`：`keyframes` 在增长、`loops=0`。
+1. 起步后 `ros2 topic echo /backend/status`：`keyframes` 在增长、`loops=0`
+   （静止不动时也应该是 0 —— 有 `min_travel_m` 门限兜底）。
 2. 绕回起点附近，`/backend/loop_markers` 出现回环边，`loops` 加一，
    `/backend/path` 在起点处闭合。
 3. `ros2 run tf2_ros tf2_echo map camera_init`：纠偏量在 1~2 s 内平滑收敛。
@@ -291,6 +292,9 @@ ros2 launch point_lio_backend backend_mid360.launch.py
 - `icp.match_voxel`（0.35 m）/ `max_match_points`（1500）：**回环匹配专用**降采样，
   只影响 GICP 输入，不影响 `/backend/map_points`。这是控制耗时的主旋钮。
 - `icp.time_budget_ms`（400 ms）：单次回环检测总预算，超了放弃本次（不会卡住关键帧）。
+- `scan_context.min_travel_m`（3 m）：两个关键帧之间的**累计行程**下限。静止/原地转时
+  观测完全相同，SC 会不停匹配早期帧；这个门限保证只有"真走过一段路再回来"才算回环
+  （真机静止实测：加之前 45 s 刷 2 条假回环，加之后 0 条）。
 - `output.correction_tau`：纠偏平滑时间常数；0 = 回环瞬间直接跳。
 - `runtime.pending_clouds`：后端排队上限，CPU 吃紧时保持 2。
 - `runtime.profile: true`：打印每个关键帧的 `detect` / `publish` 耗时与队列长度。

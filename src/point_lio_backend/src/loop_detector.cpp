@@ -85,6 +85,21 @@ PointCloudT::Ptr downsampleForMatching(const PointCloudT::ConstPtr& cloud,
   return filtered;
 }
 
+// history[from] 到 current 之间沿关键帧轨迹的累计行程（不是直线距离）。
+double travelDistance(const std::vector<Keyframe>& history, size_t from,
+                      const Keyframe& current) {
+  double travel = 0.0;
+  for (size_t i = from; i + 1 < history.size(); ++i) {
+    travel += (history[i + 1].pose_opt.translation() -
+               history[i].pose_opt.translation()).norm();
+  }
+  if (!history.empty() && from < history.size()) {
+    travel += (current.pose_opt.translation() -
+               history.back().pose_opt.translation()).norm();
+  }
+  return travel;
+}
+
 Eigen::MatrixXd effectiveDescriptor(const ScanContext& scan_context, const Keyframe& keyframe) {
   if (keyframe.descriptor.rows() > 0) {
     return keyframe.descriptor;
@@ -137,6 +152,11 @@ std::optional<LoopConstraint> LoopDetector::detect(
       }
     }
     if (std::abs(current.stamp - keyframe.stamp) < sc_params_.min_time_gap_sec) {
+      continue;
+    }
+    // 累计行程过滤：静止时 SC 会不停匹配到早期关键帧，产生位移恒等的假回环。
+    if (sc_params_.min_travel_m > 0.0 &&
+        travelDistance(history, i, current) < sc_params_.min_travel_m) {
       continue;
     }
 

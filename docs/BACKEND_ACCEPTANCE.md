@@ -75,7 +75,33 @@ python3 src/point_lio_backend/test/integration/synthetic_loop_replay.py \
 | 回环数 | **0** | 无误检 |
 | ATE | 0.254 m（优化前后完全相同） | 只在真有回环时才动轨迹 |
 
-### 4.5 性能演进（每一条都是实测后改的）
+### 4.5 真机（Mid-360 实时数据，2026-10-24 22:5x）
+
+驱动单独在跑（`mid360_driver_node`，`/livox/lidar` 9.2~9.6 Hz、`/livox/imu` 200 Hz），
+后端脚本只额外拉起 point_lio + 后端（`pcd_save:=false`，不覆写 `PCD/scans.pcd`）：
+
+```bash
+ros2 launch point_lio mapping_mid360.launch.py rviz:=false pcd_save:=false
+ros2 run point_lio_backend point_lio_backend_node \
+  --ros-args --params-file install/point_lio_backend/share/point_lio_backend/config/backend_mid360.yaml
+```
+
+| 检查项 | 结果 |
+|---|---|
+| 后端消费真实话题 | 正常（`/aft_mapped_to_init` + `/cloud_registered_body` 配对成功） |
+| 关键帧增长 | 45 s 静止 → 20~26 个关键帧（时间触发 2 s） |
+| `/backend/path` | 24~27 个位姿 |
+| TF `map → camera_init` | 连续发布，静止时平移 ~2 mm、旋转 ~0.06°（`tf2_echo` 实测） |
+| 位姿图 | 每次回环 0.7~0.8 ms |
+| `/backend/status` | keyframes / loops / last_solve_ms / last_fitness 齐全 |
+| 静止时假回环 | **修复前 2 条 → 修复后 0 条**（加了 `scan_context.min_travel_m`=3 m 累计行程门限） |
+
+发现的真机问题：静止时 SC 会不断匹配早期关键帧（观测完全相同），产生"位移恒等"的
+假回环。虽然纠偏量≈0、不损害地图，但会刷屏 `loops` 并让日志噪声变大。现在按
+**沿轨迹的累计行程**（不是直线距离）设下限，真回环必须"走过一段路再回来"。
+单元测试 `LoopDetector.RejectsStationarySelfMatch` 覆盖该行为。
+
+### 4.6 性能演进（每一条都是实测后改的）
 
 | 版本 | detect 均值 / p50 / p95 | 发布耗时 | 队列丢帧 | CPU 峰值 |
 |---|---|---|---|---|
@@ -89,7 +115,8 @@ python3 src/point_lio_backend/test/integration/synthetic_loop_replay.py \
 
 ## 5. 已知限制与后续
 
-- 真实雷达验收需要人工绕场（见 README「验收」），本机 CI 只覆盖合成回放。
+- 真机只验证了"链路接通 + 静止不误检"；**绕场闭环**需要人工按 README「验收」走一圈
+  （本机自动化无法代替真实运动）。
 - 重复走廊/对称场景仍可能误检：SC 阈值 + GICP + 修正量门限 + Huber + 残差门控是
   四道闸，仍建议现场看 `/backend/loop_markers`。
 - 漂移 > 5 m 时宁可不闭环（安全失败），不会把地图拉歪。

@@ -145,6 +145,7 @@ class BackendNode : public rclcpp::Node {
     sc.min_index_gap = declareParam<int>("scan_context.min_index_gap", sc.min_index_gap);
     sc.min_time_gap_sec =
         declareParam<double>("scan_context.min_time_gap_sec", sc.min_time_gap_sec);
+    sc.min_travel_m = declareParam<double>("scan_context.min_travel_m", sc.min_travel_m);
 
     auto& icp = params_.icp;
     icp.coarse_correspondence =

@@ -27,6 +27,10 @@ struct ScanContextParams {
   int top_candidates = 5;
   int min_index_gap = 20;            // 至少隔 20 个关键帧
   double min_time_gap_sec = 10.0;
+  // 两个关键帧之间的**累计行程**下限。静止/原地转时，同样的 SC 会不断匹配到
+  // 早期关键帧，产生一堆"位移恒等"的假回环（实测静止 45 s 就刷出 2 条）。
+  // 真回环必然走了一段路再回来，所以按路径长度而不是直线距离卡。
+  double min_travel_m = 3.0;
 };
 
 struct KeyframeParams {
