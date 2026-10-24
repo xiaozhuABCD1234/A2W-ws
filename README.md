@@ -254,6 +254,10 @@ map --(backend, 20 Hz 纠偏)--> camera_init --(point_lio)--> body
 | 优化 | Ceres 6-DOF 位姿图（Huber + 残差门控剔外点） |
 | 纠偏 | `T_map_camera_init = T_map_body · (T_camera_init_body)⁻¹`，一阶平滑 1.5 s |
 | 输出 | `/backend/path`、`/backend/odom`、`/backend/map_points`、`/backend/loop_markers`、`/backend/status`、TF `map→camera_init` |
+| 实测（合成回放，2 圈 7×7 m，注入 5% 尺度 + 0.5°/m 漂移） | ATE 1.245 m → **0.317 m**（↓74.5%），末点 2.44 m → **0.060 m**；检测 p50 28 ms；CPU 均值 17% 单核 |
+| 实测（直线 8 m，同样漂移） | 回环 0 次（无误检），轨迹不动 |
+
+验收细节见 [`docs/BACKEND_ACCEPTANCE.md`](docs/BACKEND_ACCEPTANCE.md)。
 
 ### 启动
 
@@ -284,8 +288,12 @@ ros2 launch point_lio_backend backend_mid360.launch.py
 - `keyframe.min_distance` / `min_rotation_deg`：关键帧密度。调小 → 回环更容易、CPU 更高。
 - `scan_context.sc_distance_threshold`（0.35）：调小更保守，重复走廊建议 0.30。
 - `icp.max_fitness` / `min_inlier_ratio`：回环几何校验门限。
+- `icp.match_voxel`（0.35 m）/ `max_match_points`（1500）：**回环匹配专用**降采样，
+  只影响 GICP 输入，不影响 `/backend/map_points`。这是控制耗时的主旋钮。
+- `icp.time_budget_ms`（400 ms）：单次回环检测总预算，超了放弃本次（不会卡住关键帧）。
 - `output.correction_tau`：纠偏平滑时间常数；0 = 回环瞬间直接跳。
 - `runtime.pending_clouds`：后端排队上限，CPU 吃紧时保持 2。
+- `runtime.profile: true`：打印每个关键帧的 `detect` / `publish` 耗时与队列长度。
 
 ### 已知限制
 
