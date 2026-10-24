@@ -29,7 +29,7 @@ from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 # point_lio 已改成相对路径落盘(P8):就是运行 launch 目录下的 PCD/scans.pcd。
-# 在同目录启动就能直接看到:cd ~/Projects/ros_ws && ros2 launch mid360_bringup pcd_view.launch.py
+# 在同目录启动就能直接看到:cd ~/Projects/A2W-ws && ros2 launch mid360_bringup pcd_view.launch.py
 DEFAULT_PCD = './PCD/scans.pcd'
 
 

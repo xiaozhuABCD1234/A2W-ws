@@ -1,7 +1,7 @@
 """Point-LIO 点云 -> octomap 三维占据栅格。
 
 前置(另开终端,先跑起来):
-    ros2 launch livox_ros_driver2 msg_MID360_launch.py
+    ros2 launch mid360_driver mid360_driver.launch.py
     ros2 launch point_lio mapping_mid360.launch.py rviz:=false   # 关掉 point_lio 自己的 rviz
 
 本 launch 只负责 octomap_server + rviz 这一层,方便单独重启/调参。

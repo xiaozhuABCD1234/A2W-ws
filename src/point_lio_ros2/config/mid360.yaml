@@ -34,7 +34,10 @@
             imu_time_inte: 0.005 # = 1 / frequency of IMU
             satu_acc: 3.0 # the saturation value of IMU's acceleration. not related to the units
             satu_gyro: 35.0 # the saturation value of IMU's angular velocity. not related to the units
-            acc_norm: 1.0 # 1.0 for g as unit, 9.81 for m/s^2 as unit of the IMU's acceleration
+            # LOCAL PATCH P10(见 docs/PATCHES.md):上游为 1.0(g 为单位)。
+            # mid360_driver 发布 IMU 时已把原始 g 值乘 9.81,所以这里是 m/s^2;
+            # 代码里 acc*G_m_s2/acc_norm,若仍用 1.0 会把加速度再放大 9.81 倍。
+            acc_norm: 9.81 # 1.0 for g as unit, 9.81 for m/s^2 as unit of the IMU's acceleration
             lidar_meas_cov: 0.01 # 0.001
             acc_cov_output: 500.0
             gyr_cov_output: 1000.0

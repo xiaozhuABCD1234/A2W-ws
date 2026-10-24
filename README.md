@@ -51,6 +51,11 @@ colcon build
 source install/setup.zsh
 ```
 
+> 若 `colcon build` 报 `ModuleNotFoundError: No module named 'catkin_pkg'`，说明 `which python3`
+> 指向了 uv/venv 的 Python（本机 `~/.local/bin/python3` 就是 uv 3.14）。用
+> `PATH=/usr/bin:$PATH colcon build`，或
+> `colcon build --cmake-args -DPython3_EXECUTABLE=/usr/bin/python3`。
+
 ## 运行
 
 新驱动直接发布 `sensor_msgs/PointCloud2`，point_lio 订阅的也是 PointCloud2
@@ -127,7 +132,10 @@ point_lio 只发这两帧之间的一个 tf（`camera_init → body`），没有
    `header.stamp` 为帧内最早点。改完驱动代码后的快速回归用这个。
 2. **真实雷达**：`ros2 topic hz /livox/lidar`（应 10 Hz）、
    `ros2 topic hz /livox/imu`（应约 200 Hz），再用 `ros2 topic echo --once`
-   或小脚本核对字段与时间戳。实测通过（见提交记录）。
+   或小脚本核对字段与时间戳。
+
+   本机实测（真实雷达，2026-10-24）：`/livox/lidar` ≈9.9–10.2 Hz、约 1.9 万点/帧；
+   `/livox/imu` ≈200–205 Hz；`header.stamp` 与帧内最早点差 0 s；IMU `|a|≈9.77 m/s²`。
 
 旧版 `/tmp/verify_mid360.sh` / `/tmp/e2e_test.sh` 是 `livox_ros_driver2` 时代的，
 已随驱动替换作废。
@@ -229,7 +237,9 @@ ros2 launch mid360_bringup octomap_mid360.launch.py resolution:=0.2 max_range:=3
 本工作空间对两个上游包做过实质改造，这是本仓库存在的主要价值：
 
 ### mid360_driver
-上游：`https://github.com/Yancey2023/mid360_driver` @ `4adf8df`（MIT，作者 Yingjie Huang）
+上游：`https://github.com/Yancey2023/mid360_driver`（upstream/main `e2ba0ca`，MIT，作者 Yingjie Huang）。
+本仓库 vendor 的基线是本地 fork `xiaozhuABCD1234/mid360_driver` 的 `4adf8df`（`add mid70 driver`，
+即 upstream/main + Mid-70 支持；多出的 `mid70_driver_node` 不影响 Mid-360 通路）。
 
 - 换掉旧 `livox_ros_driver2` 的原因：不依赖 Livox-SDK2，直接实现 UDP；自动识别雷达 IP；
   直接发 `sensor_msgs/PointCloud2`，point_lio 不需要 CustomMsg；依赖更轻。
@@ -256,7 +266,9 @@ ros2 launch mid360_bringup octomap_mid360.launch.py resolution:=0.2 max_range:=3
 - `config/mid360.yaml` —— 为配合 octomap：`odom_child_frame_id` 由上游默认的
   `aft_mapped` 改为 `body`（与 `/cloud_registered_body` 硬编码的 frame_id 对齐，否则
   octomap_server 拿不到 tf）；`publish.scan_bodyframe_pub_en` 改为 `true`。
-  `timestamp_unit` 由 `3`（ns）改为 `0`（秒，P9），与 `mid360_driver` 的点时间一致。
+  `timestamp_unit` 由 `3`（ns）改为 `0`（秒，P9），与 `mid360_driver` 的点时间一致；
+  `mapping.acc_norm` 由 `1.0`（g）改为 `9.81`（m/s²，P10），因为 `mid360_driver` 发布 IMU
+  前已把原始 g 值乘 9.81（旧 `livox_ros_driver2` 直接发 g）。
 
 ### mid360_bringup（**本仓库新增包**，非上游）
 
@@ -301,6 +313,9 @@ git -C ~/Projects/mid360_driver log --oneline
   雷达 IP 本身不用配（驱动自动识别）。
 - 本机默认 shell 是 **zsh**。ROS 的 `setup.bash` 是 bash 专用模板，zsh 下会因
   `BASH_SOURCE` 为空而去当前目录找 `setup.sh` 报 `127`，请一律用 `setup.zsh`。
+- 若 `pointlio_mapping` 启动即报 `symbol lookup error: libpcl_io.so... undefined symbol:
+  libusb_set_option`，检查 `LD_LIBRARY_PATH` 是否含 `/opt/MVS/lib/64`（相机 SDK 自带的旧
+  `libusb-1.0.so.0` 抢先被加载）。启动前把它从 `LD_LIBRARY_PATH` 里剔除即可。
 - `src/point_lio_ros2/image/` 共 246MB 演示 GIF（最大单个 89.6MB），已从 `.gitignore` 中排除。
 - `src/point_lio_ros2/Log/{pos_log,mat_out,imu_pbp}.txt` 是运行时被清零覆写的产物，已忽略。
 - `src/point_lio_ros2/include/IKFoM/` 下 3 个 `.vscode/settings.json`（上游跟踪的 IDE 配置）

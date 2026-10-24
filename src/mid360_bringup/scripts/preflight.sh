@@ -142,8 +142,8 @@ else
   info "多半是同步上游时补丁被覆盖。见 docs/PATCHES.md 的 P1,恢复后再 build。"
 fi
 
-# ── C2 点时间单位 ──────────────────────────────────────────────────────────
-head2 'C2  点时间单位 timestamp_unit'
+# ── C2 点时间单位 / IMU 量纲 ───────────────────────────────────────────────
+head2 'C2  点时间单位 timestamp_unit / IMU 量纲 acc_norm'
 if [ "$LIDAR_TYPE" = "1" ]; then
   if [ "$TS_UNIT" = "0" ]; then
     pass "timestamp_unit=0(秒):与 mid360_driver 的 float64 绝对 Unix 秒一致"
@@ -153,6 +153,17 @@ if [ "$LIDAR_TYPE" = "1" ]; then
     info "point_lio 按 timestamp_unit 把帧内时差缩放到 ms:0→×1e3,3→×1e-6;"
     info "若仍写 3(ns),curvature 会小 1000 倍 → 逐点 deskew 静默失效(不报错)。"
   fi
+  ACC_NORM="$(yaml_get "$PIO_CFG" acc_norm)"
+  case "${ACC_NORM:-}" in
+    9.81|9.810)
+      pass "acc_norm=$ACC_NORM(m/s^2):与 mid360_driver 的 IMU 加速度单位一致"
+      ;;
+    *)
+      fail "acc_norm='${ACC_NORM:-空}',应为 9.81(m/s^2)"
+      info "mid360_driver 发布 IMU 前已把原始 g 值乘 9.81;point_lio 代码里是 acc*G/acc_norm,"
+      info "acc_norm=1.0 会把加速度再放大 9.81 倍(重力/运动估计失真,静态场景可能看不出来)。"
+      ;;
+  esac
 else
   pass "非 Livox 分支,跳过"
 fi

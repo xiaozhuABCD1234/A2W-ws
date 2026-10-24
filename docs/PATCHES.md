@@ -17,7 +17,7 @@ rviz 里永远没有点云（历史上的 livox `xfer_format` 错配就是这样
 |---|---|---|---|
 | `point_lio_ros2` | `github.com/dfloreaa/point_lio_ros2`（ROS2 移植版） | `a8e2d0d`（2025-08-14） | 本地 `~/Downloads/point_lio_ros2_upstream` |
 | `point_lio_ros2`（对照参考） | `github.com/hku-mars/Point-LIO`（ROS1 官方） | 本地快照 | 本地 `~/Downloads/Point-LIO_ros1_official`，写补丁时以它为准 |
-| `mid360_driver` | `github.com/Yancey2023/mid360_driver` | `4adf8df` | MIT，作者 Yingjie Huang；本地 `~/Projects/mid360_driver` |
+| `mid360_driver` | `github.com/Yancey2023/mid360_driver`（upstream/main `e2ba0ca`） | 本地 fork `xiaozhuABCD1234/mid360_driver` 的 `4adf8df`（`add mid70 driver`，含 Mid-70 支持） | MIT，作者 Yingjie Huang；本地 `~/Projects/mid360_driver` |
 | `mid360_bringup` | — | — | **本项目自有代码，不是 fork**，不受本清单约束 |
 
 ## 2. 补丁清单
@@ -32,6 +32,7 @@ rviz 里永远没有点云（历史上的 livox `xfer_format` 错配就是这样
 | **P7** | `src/point_lio_ros2/launch/mapping_mid360.launch.py`<br>`src/mid360_bringup/launch/mid360.launch.py` | 新增 launch 参数 `pcd_save`（默认 `''`），用 `OpaqueFunction` **条件**追加 `{'pcd_save': {'pcd_save_en': bool}}`；一键 launch 负责透传 | 目标是让“是否落盘 PCD”能**启动时开关**，而不必改 yaml + `colcon build`（`install/` 是拷贝，不 build 不生效）。必须是**条件**追加：节点 `parameters` 列表后者覆盖前者，无条件追加 = 把 yaml 顶掉（就是 P5/约定 A 那个坑）。注：运行期 `ros2 param set /laserMapping pcd_save.pcd_save_en true` **无效** —— `parameters.cpp:154` 只在启动时 `get_parameter` 一次进普通 bool，全文件无参数回调 | 上游无此参数；上游默认 `pcd_save_en: false` |
 | **P8** | `src/point_lio_ros2/src/laserMapping.cpp`<br>（两个落盘点：`:568` 分片、`:1360` 退出时；另有 `main` 里的 `mkdir("PCD")`） | `string(ROOT_DIR) + "PCD/..."` → `"PCD/..."`：改用**相对路径**，即**运行 `ros2 launch` 那个目录**下的 `PCD/`；并在启动时 `mkdir("PCD", 0755)` 一次（已存在 = `EEXIST`，不算错；建不了会打印 `[pcd_save] mkdir PCD 失败(...)`，否则失败是静默的） | 上游把路径编译期烧死成 `ROOT_DIR`（= 构建时的源码绝对路径，`CMakeLists.txt:13`）：工作空间一换目录/换机器就得重新 `colcon build`，产物还落在源码树里。PCL 的 `savePCDFileBinary` 不自建目录（上游靠 `PCD/temp.txt` 占位，相对路径下那个占位文件不起作用），所以补了 mkdir。`pcd_view.launch.py` 的默认文件路径同步改成 `./PCD/scans.pcd` | 上游行为见 `laserMapping.cpp:1360` |
 | **P9** | `src/point_lio_ros2/config/mid360.yaml` | `timestamp_unit: 3 → 0`（秒） | `mid360_driver` 的每点 `timestamp` 是**绝对 Unix 秒**；若仍按 3（ns）换算，`curvature` 会小 1000 倍，逐点 deskew 的时间轴整体错位（旋转重影的量级） | 上游/旧驱动的点时间是 ns，所以原配置是 3；换驱动必须同步改 |
+| **P10** | `src/point_lio_ros2/config/mid360.yaml` | `mapping.acc_norm: 1.0 → 9.81` | 旧 `livox_ros_driver2` 发的 IMU 加速度是 **g**（`pub_handler.cpp` 直接拷 `imu->acc_x`），所以上游用 1.0；`mid360_driver` 发的是 **m/s²**（发布前乘 9.81）。point_lio 代码里是 `acc * G_m_s2 / acc_norm`，若仍用 1.0，所有加速度会被再放大 9.81 倍 → 重力/速度估计系统性失真（静止场景可能不明显，一动就飘） | 上游默认 1.0（对应 g）；换驱动必须同步改，`preflight.sh` 的 C2 会拦 |
 | **M1** | `src/mid360_driver/src/asio_compat.hpp`（新增）<br>`src/mid360_driver/src/` 下各 `#include <asio.hpp>`<br>`src/mid360_driver/package.xml` | 新增 `asio_compat.hpp`：include `<boost/asio.hpp>`，并把 `asio` 命名空间转发到 `boost::asio`（含 `error_code` 别名）；源码里的 `#include <asio.hpp>` 改为 `#include "asio_compat.hpp"`；`package.xml` 的依赖 `asio` 改为 `boost` | 本机没有 `libasio-dev` 且无法 sudo；Boost.Asio 与独立 Asio API 兼容，改头文件即可 | 上游原版需要 `libasio-dev`。换机器若想回上游原版，删掉 M1、装回 `libasio-dev` 即可 |
 | **M2** | `src/mid360_driver/config/param.yaml` | `host_ip: 192.168.1.50`（本机接雷达网卡 `enp5s0` 的地址）；`lidar_topic` / `imu_topic` 保持 `/livox/lidar` / `/livox/imu` | 驱动只在本机 `host_ip` 上监听 UDP 56301/56401，被动等雷达推流；换机器/网卡必须同步改，否则收不到数据 | 上游默认也是 `192.168.1.50`（示例值）；真正生效的是本地这份配置 |
 | **S1** | 仓库结构 | 上游包扁平化进 `src/`（现为 `mid360_driver` + `point_lio_ros2`）；移除 point_lio 上游遗留的失效 `.gitmodules` / 子模块（`3rdparty/IKFoM`、`ikd-Tree` 直接入库） | 便于单工作空间一次 `colcon build`，避免嵌套仓库的 submodule 同步问题 | commit `8635063`、`8938f25` |
@@ -66,7 +67,7 @@ rviz 里永远没有点云（历史上的 livox `xfer_format` 错配就是这样
 ```bash
 cd ~/Projects/A2W-ws
 
-# 1) point_lio 差异应该只剩本清单列出的那些文件(P1/P2/P4/P5/P7/P8/P9 + 上游自带的 .gitmodules)
+# 1) point_lio 差异应该只剩本清单列出的那些文件(P1/P2/P4/P5/P7/P8/P9/P10 + 上游自带的 .gitmodules)
 diff -rq src/point_lio_ros2 ~/Downloads/point_lio_ros2_upstream
 
 # 2) mid360_driver 与上游本地 clone 对比(若有;本地 clone 见 §1)
@@ -87,7 +88,7 @@ colcon build
 第 1 步的**期望输出**（多出来的文件说明上游改过或补丁丢了，需要人工判断）：
 
 ```
-文件 src/point_lio_ros2/config/mid360.yaml 和 .../config/mid360.yaml 不同     # P2/P9
+文件 src/point_lio_ros2/config/mid360.yaml 和 .../config/mid360.yaml 不同     # P2/P9/P10
 文件 src/point_lio_ros2/src/preprocess.cpp 和 .../src/preprocess.cpp 不同     # P1
 文件 src/point_lio_ros2/src/preprocess.h 和 .../src/preprocess.h 不同         # P1
 文件 src/point_lio_ros2/src/laserMapping.cpp 和 .../src/laserMapping.cpp 不同 # P4/P8
