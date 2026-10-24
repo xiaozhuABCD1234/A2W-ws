@@ -25,7 +25,14 @@ import sys
 import tempfile
 import time
 
-import numpy as np
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    # 本机 which python3 可能是 uv/venv 的 3.14（没有 numpy/rclpy）；
+    # 自动切到系统 python3，保持 ROS 环境变量不变。
+    if os.path.realpath(sys.executable) != '/usr/bin/python3':
+        os.execv('/usr/bin/python3', ['/usr/bin/python3'] + sys.argv)
+    raise
 
 import rclpy
 from rclpy.node import Node
@@ -341,6 +348,13 @@ def main():
         raise SystemExit('找不到测试参数: ' + params)
 
     os.environ.setdefault('ROS_DOMAIN_ID', '77')
+    # 沙箱/容器里 ~/.ros 可能不可写：把 ROS 日志与 home 指到 /tmp。
+    ros_home = os.path.join(tempfile.gettempdir(), 'point_lio_backend_ros_home')
+    os.makedirs(os.path.join(ros_home, 'log'), exist_ok=True)
+    os.environ.setdefault('ROS_HOME', ros_home)
+    os.environ.setdefault('ROS_LOG_DIR', os.path.join(ros_home, 'log'))
+    # 沙箱里 FastDDS 共享内存段可能建不了，强制走 UDP，避免一堆 SHM 报错。
+    os.environ.setdefault('FASTDDS_BUILTIN_TRANSPORTS', 'UDPv4')
     print(f'[replay] ws={ws} pcd={pcd} mode={args.mode} domain={os.environ["ROS_DOMAIN_ID"]}')
 
     # 快照，避免用户在建图时覆盖
