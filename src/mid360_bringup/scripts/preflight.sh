@@ -335,7 +335,7 @@ else
 fi
 if [ -n "$WS" ] && [ -f "$WS/src/mid360_bringup/launch/mid360.launch.py" ]; then
   ML="$WS/src/mid360_bringup/launch/mid360.launch.py"
-  if grep -q "point_lio_backend" "$ML" && grep -q "'frame_id': 'map'" "$ML"; then
+  if grep -q "get_package_prefix('point_lio_backend')" "$ML" && grep -q "'frame_id': 'map'" "$ML"; then
     pass "一键 launch 已 include 后端,并在 backend=true 时把 octomap 切到 map 系"
   else
     fail "mid360.launch.py 缺少 point_lio_backend include 或 frame_id=map"
@@ -345,6 +345,23 @@ fi
 if [ -n "$WS" ]; then
   if [ -d "$WS/install/point_lio_backend" ]; then
     pass "point_lio_backend 已 build(install/ 存在)"
+    # 磁盘上有 ≠ 当前终端环境里能发现:环境是在新增该包之前 source 的话,
+    # AMENT_PREFIX_PATH 里没有它,launch 会报 "package not found"(实测踩过一次)。
+    found_in_env=0
+    IFS_save="$IFS"; IFS=':'
+    for p in ${AMENT_PREFIX_PATH:-}; do
+      [ -f "$p/share/ament_index/resource_index/packages/point_lio_backend" ] \
+        && [ "$p" = "$WS/install/point_lio_backend" ] && found_in_env=1
+    done
+    IFS="$IFS_save"
+    if [ "$found_in_env" = 1 ]; then
+      pass "当前环境已包含 point_lio_backend(AMENT_PREFIX_PATH)"
+    else
+      warn "当前终端环境看不到 point_lio_backend(AMENT_PREFIX_PATH 不含它)"
+      info "多半是这个终端在新增该包之前 source 的。重新 source 或新开终端:"
+      info "    source $WS/install/setup.zsh"
+      info "不用后端可加 backend:=false。"
+    fi
   else
     warn "install/point_lio_backend 不存在:backend:=true 时一键 launch 会失败,先 colcon build"
   fi

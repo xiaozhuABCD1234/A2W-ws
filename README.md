@@ -422,6 +422,11 @@ git -C ~/Projects/mid360_driver log --oneline
   已加 **P11** 自动剔除该路径并打印提示；若你直接跑 `pointlio_mapping` 二进制，仍需自己
   `export LD_LIBRARY_PATH=$(echo $LD_LIBRARY_PATH | tr ':' '\n' | grep -v /opt/MVS | paste -sd:)`。
   这个错误会让 point_lio 进程 exit 127，rviz 紧接着报 `Frame [camera_init] does not exist`。
+- **新增包后要重新 `source` 终端**。`point_lio_backend` 是后加的包：如果你的终端是
+  在它 build 之前 source 的，`AMENT_PREFIX_PATH` 里没有它，一键启动会直接失败：
+  `package 'point_lio_backend' not found`（launch 现在会给出可操作提示，preflight 的 C7
+  也会 WARN）。解决：在**同一个终端**重新 `source ~/Projects/A2W-ws/install/setup.zsh`，
+  或新开终端；不想用后端就加 `backend:=false`。
 - `src/point_lio_ros2/image/` 共 246MB 演示 GIF（最大单个 89.6MB），已从 `.gitignore` 中排除。
 - `src/point_lio_ros2/Log/{pos_log,mat_out,imu_pbp}.txt` 是运行时被清零覆写的产物，已忽略。
 - `src/point_lio_ros2/include/IKFoM/` 下 3 个 `.vscode/settings.json`（上游跟踪的 IDE 配置）

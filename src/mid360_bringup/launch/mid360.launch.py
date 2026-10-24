@@ -121,13 +121,35 @@ def generate_launch_description():
         }.items(),
     )
 
-    backend = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(PathJoinSubstitution([
-            FindPackageShare('point_lio_backend'),
-            'launch', 'backend_mid360.launch.py',
-        ])),
-        condition=IfCondition(LaunchConfiguration('backend')),
-    )
+    def _backend_include(context):
+        """backend:=true 时 include 后端;包找不到就给出可操作的报错。
+
+        为什么不用 IncludeLaunchDescription + IfCondition:
+        当终端环境是在新增 point_lio_backend 之前 source 的,AMENT_PREFIX_PATH 里
+        没有它,launch 会抛
+          "package 'point_lio_backend' not found, searching: [...]"
+        —— 看不出是"环境旧了"。这里前置判断并直接说要重新 source。
+        """
+        raw = context.perform_substitution(LaunchConfiguration('backend')).strip().lower()
+        if raw in ('0', 'false', 'no', 'off', ''):
+            return []
+        try:
+            get_package_prefix('point_lio_backend')
+        except Exception:
+            raise RuntimeError(
+                'backend:=true 需要 point_lio_backend,但当前终端环境里找不到它。\n'
+                '  几乎都是因为:这个终端是在新增该包之前 source 的(AMENT_PREFIX_PATH 是旧的)。\n'
+                '  解决:在**同一个终端**重新 source,或新开终端:\n'
+                '      source ~/Projects/A2W-ws/install/setup.zsh\n'
+                '  若 install/point_lio_backend 不存在,先:\n'
+                '      colcon build --packages-select point_lio_backend\n'
+                '  只用前端(point_lio + octomap,不要回环):加 backend:=false')
+        return [IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(PathJoinSubstitution([
+                FindPackageShare('point_lio_backend'),
+                'launch', 'backend_mid360.launch.py',
+            ])),
+        )]
 
     def _octomap_and_rviz(context):
         """按 backend 开关选择 octomap 世界系与 rviz 配置。
@@ -172,6 +194,6 @@ def generate_launch_description():
         backend_arg,
         driver,
         point_lio,
-        backend,
+        OpaqueFunction(function=_backend_include),
         OpaqueFunction(function=_octomap_and_rviz),
     ])
