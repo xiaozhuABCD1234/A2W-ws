@@ -10,6 +10,7 @@ install(DIRECTORY launch config rviz
 install(PROGRAMS
   scripts/cleanup.sh
   scripts/preflight.sh
+  scripts/check_tf.sh
   DESTINATION lib/${PROJECT_NAME}
 )
 

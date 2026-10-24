@@ -776,6 +776,7 @@ class BackendNode : public rclcpp::Node {
                    ? rclcpp::Time(keyframe_stamp_ns_.back())
                    : toRosTime(keyframes_.back().stamp));
 
+
     visualization_msgs::msg::Marker loops;
     loops.header.frame_id = params_.world_frame;
     loops.header.stamp = stamp;
