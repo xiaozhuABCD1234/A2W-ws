@@ -42,7 +42,12 @@ struct KeyframeParams {
 struct IcpParams {
   double coarse_correspondence = 2.0;  // m，粗配准（先粗后细，容忍回环处的累积漂移）
   double max_correspondence = 1.0;     // m，精配准
-  int max_iterations = 40;
+  int max_iterations = 20;             // 精配准迭代上限（GICP 收敛快，20 足够）
+  int coarse_iterations = 10;          // 粗配准迭代上限
+  double match_voxel = 0.35;           // m，GICP 前的体素降采样（回环匹配专用，不影响地图）
+  int max_match_points = 1500;         // 降采样后再截断，控制单次 GICP 点数
+  bool stop_at_first = true;           // 候选按 SC 距离升序，命中第一个通过校验的就返回
+  double time_budget_ms = 400.0;       // 单次回环检测总预算；超了就放弃本次（0 = 不限）
   double max_fitness = 0.10;         // GICP 均方误差
   double min_inlier_ratio = 0.6;
   double max_correction_trans = 5.0; // m
@@ -75,6 +80,7 @@ struct RuntimeParams {
   double reset_on_jump_m = 2.0;
   double stamp_tolerance_sec = 0.05;
   double max_loop_solve_sec = 0.5;
+  bool profile = false;              // 打印 worker 各阶段耗时（调参/验收用）
 };
 
 // ── 数据结构 ───────────────────────────────────────────────────────────────

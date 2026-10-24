@@ -152,6 +152,13 @@ class BackendNode : public rclcpp::Node {
     icp.max_correspondence =
         declareParam<double>("icp.max_correspondence", icp.max_correspondence);
     icp.max_iterations = declareParam<int>("icp.max_iterations", icp.max_iterations);
+    icp.coarse_iterations =
+        declareParam<int>("icp.coarse_iterations", icp.coarse_iterations);
+    icp.match_voxel = declareParam<double>("icp.match_voxel", icp.match_voxel);
+    icp.max_match_points =
+        declareParam<int>("icp.max_match_points", icp.max_match_points);
+    icp.stop_at_first = declareParam<bool>("icp.stop_at_first", icp.stop_at_first);
+    icp.time_budget_ms = declareParam<double>("icp.time_budget_ms", icp.time_budget_ms);
     icp.max_fitness = declareParam<double>("icp.max_fitness", icp.max_fitness);
     icp.min_inlier_ratio = declareParam<double>("icp.min_inlier_ratio", icp.min_inlier_ratio);
     icp.max_correction_trans =
@@ -197,6 +204,7 @@ class BackendNode : public rclcpp::Node {
         declareParam<double>("runtime.stamp_tolerance_sec", rt.stamp_tolerance_sec);
     rt.max_loop_solve_sec =
         declareParam<double>("runtime.max_loop_solve_sec", rt.max_loop_solve_sec);
+    rt.profile = declareParam<bool>("runtime.profile", rt.profile);
 
     max_queue_ = static_cast<size_t>(std::max(1, rt.pending_clouds));
     if (rt.stamp_tolerance_sec <= 0.0) {
@@ -393,6 +401,11 @@ class BackendNode : public rclcpp::Node {
   }
 
   // ── worker ──────────────────────────────────────────────────────────────
+  size_t queueSize() {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    return queue_.size();
+  }
+
   void workerLoop() {
     while (true) {
       PendingPair job;
@@ -487,8 +500,11 @@ class BackendNode : public rclcpp::Node {
         keyframe.pose_opt = keyframe.pose_raw;
       }
 
+      const auto t_detect0 = std::chrono::steady_clock::now();
       const std::optional<LoopConstraint> loop =
           loop_detector_->detect(keyframe, keyframes_);
+      const double detect_ms = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - t_detect0).count();
 
       {
         std::lock_guard<std::mutex> lock(state_mutex_);
@@ -508,15 +524,24 @@ class BackendNode : public rclcpp::Node {
       }
 
       // 契约：每个新关键帧都发一次 map 系 path；优化后再重发。
+      const auto t_pub0 = std::chrono::steady_clock::now();
       publishPath();
       if (params_.output.publish_raw_path) {
         publishRawPath();
       }
       publishLoopMarkers();
       publishMapPointsIfDue(false);
+      const double pub_ms = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - t_pub0).count();
 
       if (loop.has_value()) {
         runOptimization();
+      }
+      if (params_.runtime.profile) {
+        RCLCPP_INFO(get_logger(),
+                    "[profile] kf=%d pts=%zu detect=%.1fms publish=%.1fms queue=%zu",
+                    keyframe.id, keyframe.cloud ? keyframe.cloud->size() : 0u, detect_ms,
+                    pub_ms, queueSize());
       }
     } catch (const std::exception& e) {
       RCLCPP_ERROR(get_logger(), "worker keyframe exception: %s", e.what());

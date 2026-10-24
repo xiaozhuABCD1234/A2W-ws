@@ -1,10 +1,12 @@
 #include "point_lio_backend/loop_detector.hpp"
 
 #include <pcl/common/transforms.h>
+#include <pcl/filters/voxel_grid.h>
 #include <pcl/kdtree/kdtree_flann.h>
 #include <pcl/registration/gicp.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -47,6 +49,42 @@ Eigen::VectorXd effectiveRingKey(const ScanContext& scan_context, const Keyframe
   return Eigen::VectorXd();
 }
 
+// 回环匹配专用降采样：GICP 的耗时≈点数×候选数×迭代数，全分辨率子图太贵。
+// 只影响匹配，不影响 keyframe.cloud（地图与输出仍是原分辨率）。
+PointCloudT::Ptr downsampleForMatching(const PointCloudT::ConstPtr& cloud,
+                                       const IcpParams& params) {
+  if (!cloud || cloud->empty()) {
+    return PointCloudT::Ptr(new PointCloudT());
+  }
+  PointCloudT::Ptr filtered(new PointCloudT());
+  if (params.match_voxel > 0.0) {
+    const float leaf = static_cast<float>(params.match_voxel);
+    pcl::VoxelGrid<PointT> voxel;
+    voxel.setLeafSize(leaf, leaf, leaf);
+    voxel.setInputCloud(cloud);
+    voxel.filter(*filtered);
+  } else {
+    *filtered = *cloud;
+  }
+  // 极端情况下体素没压下来（子图特别大），再按步长截断。
+  const int max_points = std::max(1, params.max_match_points);
+  if (static_cast<int>(filtered->size()) > max_points) {
+    PointCloudT::Ptr thinned(new PointCloudT());
+    thinned->reserve(static_cast<size_t>(max_points));
+    const double stride =
+        static_cast<double>(filtered->size()) / static_cast<double>(max_points);
+    for (double idx = 0.0; idx < static_cast<double>(filtered->size()); idx += stride) {
+      thinned->push_back(filtered->points[static_cast<size_t>(idx)]);
+    }
+    thinned->width = static_cast<uint32_t>(thinned->size());
+    thinned->height = 1;
+    return thinned;
+  }
+  filtered->width = static_cast<uint32_t>(filtered->size());
+  filtered->height = 1;
+  return filtered;
+}
+
 Eigen::MatrixXd effectiveDescriptor(const ScanContext& scan_context, const Keyframe& keyframe) {
   if (keyframe.descriptor.rows() > 0) {
     return keyframe.descriptor;
@@ -81,6 +119,7 @@ std::optional<LoopConstraint> LoopDetector::detect(
   struct Candidate {
     size_t history_index = 0;
     double ring_key_distance = std::numeric_limits<double>::max();
+    double sc_distance = std::numeric_limits<double>::max();
   };
   std::vector<Candidate> candidates;
   candidates.reserve(history.size());
@@ -125,27 +164,62 @@ std::optional<LoopConstraint> LoopDetector::detect(
               });
   }
 
-  std::optional<LoopConstraint> best;
-  double best_fitness = std::numeric_limits<double>::max();
-
+  // ── 第二阶段：SC 精筛 ────────────────────────────────────────────────
+  // 先算完所有候选的 SC 距离再排序：GICP 很贵，必须让最像的候选先试，
+  // 配合 stop_at_first 大多数关键帧只跑 0~1 次 GICP。
+  struct Verified {
+    size_t history_index = 0;
+    double sc_distance = std::numeric_limits<double>::max();
+    int shift = 0;
+  };
+  std::vector<Verified> verified;
+  verified.reserve(candidates.size());
   for (const Candidate& candidate : candidates) {
-    const Keyframe& keyframe = history[candidate.history_index];
     const Eigen::MatrixXd history_descriptor =
-        effectiveDescriptor(scan_context_, keyframe);
+        effectiveDescriptor(scan_context_, history[candidate.history_index]);
     if (history_descriptor.rows() == 0) {
       continue;
     }
-
     int best_shift = 0;
     const double sc_distance =
         scan_context_.distance(current_descriptor, history_descriptor, &best_shift);
     if (sc_distance > sc_params_.sc_distance_threshold) {
       continue;
     }
+    verified.push_back(Verified{candidate.history_index, sc_distance, best_shift});
+  }
+  std::sort(verified.begin(), verified.end(),
+            [](const Verified& lhs, const Verified& rhs) {
+              return lhs.sc_distance < rhs.sc_distance;
+            });
+
+  std::optional<LoopConstraint> best;
+  double best_fitness = std::numeric_limits<double>::max();
+  if (verified.empty()) {
+    return best;
+  }
+
+  // 匹配用点云只降采样一次（当前帧），历史帧按需降采样。
+  const PointCloudT::Ptr current_match = downsampleForMatching(current.cloud, icp_params_);
+  const auto detect_start = std::chrono::steady_clock::now();
+  const double budget_ms = icp_params_.time_budget_ms;
+
+  for (const Verified& candidate : verified) {
+    // 预算控制：坏候选可能让 GICP 迭代满也不收敛，必须在循环里判超时，
+    // 否则一次检测就能把 worker 卡住 1 s 以上。
+    if (budget_ms > 0.0) {
+      const double elapsed_ms = std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - detect_start).count();
+      if (elapsed_ms > budget_ms) {
+        break;
+      }
+    }
+    const Keyframe& keyframe = history[candidate.history_index];
+    const int best_shift = candidate.shift;
 
     // 初值：前端位姿推出的相对位姿 history^-1 * current。
     Eigen::Isometry3d initial = keyframe.pose_opt.inverse() * current.pose_opt;
-    const int sectors = static_cast<int>(history_descriptor.cols());
+    const int sectors = static_cast<int>(current_descriptor.cols());
     if (sectors > 0) {
       // a.col(j) 对齐 b.col(j+shift)，对应相对航向 shift * 360/sectors。
       const double sc_yaw =
@@ -156,6 +230,13 @@ std::optional<LoopConstraint> LoopDetector::detect(
       initial.linear() = z_rotation * initial.linear();
     }
 
+    const PointCloudT::Ptr target_match =
+        downsampleForMatching(keyframe.cloud, icp_params_);
+    if (!current_match || current_match->size() < 10 ||
+        !target_match || target_match->size() < 10) {
+      continue;
+    }
+
     // 两级 GICP：先用较大的对应距离粗配准吸收累积漂移，再精细配准。
     const double fine_correspondence = icp_params_.max_correspondence;
     const double coarse_correspondence =
@@ -164,9 +245,9 @@ std::optional<LoopConstraint> LoopDetector::detect(
 
     if (coarse_correspondence > fine_correspondence) {
       pcl::GeneralizedIterativeClosestPoint<PointT, PointT> coarse_gicp;
-      coarse_gicp.setInputSource(current.cloud);
-      coarse_gicp.setInputTarget(keyframe.cloud);
-      coarse_gicp.setMaximumIterations(std::max(1, icp_params_.max_iterations / 2));
+      coarse_gicp.setInputSource(current_match);
+      coarse_gicp.setInputTarget(target_match);
+      coarse_gicp.setMaximumIterations(std::max(1, icp_params_.coarse_iterations));
       coarse_gicp.setMaxCorrespondenceDistance(coarse_correspondence);
 
       PointCloudT coarse_aligned;
@@ -178,8 +259,8 @@ std::optional<LoopConstraint> LoopDetector::detect(
     }
 
     pcl::GeneralizedIterativeClosestPoint<PointT, PointT> gicp;
-    gicp.setInputSource(current.cloud);
-    gicp.setInputTarget(keyframe.cloud);
+    gicp.setInputSource(current_match);
+    gicp.setInputTarget(target_match);
     gicp.setMaximumIterations(std::max(1, icp_params_.max_iterations));
     gicp.setMaxCorrespondenceDistance(fine_correspondence);
 
@@ -200,9 +281,9 @@ std::optional<LoopConstraint> LoopDetector::detect(
 
     // 内点率：变换后的 source 点落入 target 最近邻 max_correspondence 内的比例。
     PointCloudT transformed;
-    pcl::transformPointCloud(*current.cloud, transformed, final.matrix().cast<float>());
+    pcl::transformPointCloud(*current_match, transformed, final.matrix().cast<float>());
     pcl::KdTreeFLANN<PointT> target_tree;
-    target_tree.setInputCloud(keyframe.cloud);
+    target_tree.setInputCloud(target_match);
     const double max_sq = icp_params_.max_correspondence * icp_params_.max_correspondence;
     size_t inliers = 0;
     std::vector<int> nn_index(1);
@@ -239,6 +320,11 @@ std::optional<LoopConstraint> LoopDetector::detect(
       constraint.inlier_ratio = inlier_ratio;
       constraint.active = true;
       best = constraint;
+      // 候选已按 SC 距离升序：第一个通过全部校验的通常就是正确回环。
+      // 后面再跑 GICP 只会增加延迟（实测 8 候选全跑要 0.7~3.3 s/关键帧）。
+      if (icp_params_.stop_at_first) {
+        return best;
+      }
     }
   }
 

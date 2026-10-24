@@ -39,7 +39,17 @@
     # ── GICP 校验 ─────────────────────────────────────────────────────────
     icp.coarse_correspondence: 2.0
     icp.max_correspondence: 1.0
-    icp.max_iterations: 40
+    # 迭代与点数上限:实测 5000 点 × 8 候选 × 两级 GICP 要 0.7~3.3 s/关键帧,
+    # 会把 1 s/关键帧 的节奏拖垮(队列丢帧)。回环匹配不需要全分辨率:
+    # 0.35 m 体素把子图降到 ~1200 点,精度足够而耗时降一个数量级。
+    icp.max_iterations: 20
+    icp.coarse_iterations: 10
+    icp.match_voxel: 0.35
+    icp.max_match_points: 1500
+    icp.stop_at_first: true
+    # 单次 detect 的总预算（含 SC + 全部 GICP）。超预算就放弃本次回环，
+    # 保证 worker 不会因为一次坏候选把整个关键帧节奏拖垮（0 = 不限）。
+    icp.time_budget_ms: 400.0
     icp.max_fitness: 0.10
     icp.min_inlier_ratio: 0.6
     icp.max_correction_trans: 5.0
@@ -72,3 +82,4 @@
     runtime.reset_on_jump_m: 2.0
     runtime.stamp_tolerance_sec: 0.05
     runtime.max_loop_solve_sec: 0.5
+    runtime.profile: false          # true: 打印每个关键帧各阶段耗时(验收/调参用)

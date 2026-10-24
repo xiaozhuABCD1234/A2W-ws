@@ -31,7 +31,12 @@
 
     icp.coarse_correspondence: 2.5
     icp.max_correspondence: 1.0
-    icp.max_iterations: 40
+    icp.max_iterations: 20
+    icp.coarse_iterations: 10
+    icp.match_voxel: 0.35
+    icp.max_match_points: 1500
+    icp.stop_at_first: true
+    icp.time_budget_ms: 2000.0
     icp.max_fitness: 0.15
     icp.min_inlier_ratio: 0.5
     icp.max_correction_trans: 5.0
@@ -57,4 +62,5 @@
     runtime.pending_clouds: 5
     runtime.reset_on_jump_m: 3.0
     runtime.stamp_tolerance_sec: 0.05
+    runtime.profile: true
     runtime.max_loop_solve_sec: 1.0
