@@ -77,6 +77,14 @@ struct OutputParams {
   double correction_tau = 1.5;       // s，0 = 直接跳变
   bool publish_odom = true;
   bool publish_raw_path = false;
+
+  // 落盘：把 **回环校正后的 map 系点云** 写成 PCD。
+  // 与 point_lio 的 pcd_save 不是一回事：那份在 vendored 包里写，
+  // 存的是前端 feats_down_world(camera_init 系、没有回环纠正)。
+  // 这份每次都用各关键帧最新的 pose_opt 重建，回环把轨迹拉直的效果会体现在文件里。
+  bool save_pcd = true;
+  std::string pcd_path = "PCD/backend_map.pcd";  // 相对运行 launch 的目录(P8 约定)
+  double pcd_save_period = 0.0;                  // s；>0 时定期覆盖写(防 kill -9 丢图)
 };
 
 struct RuntimeParams {

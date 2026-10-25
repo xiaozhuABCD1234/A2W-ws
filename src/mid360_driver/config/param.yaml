@@ -5,7 +5,11 @@ mid360_driver:
         imu_topic: /livox/imu
         imu_frame: imu_frame
         lidar_publish_time_interval: 0.1
-        # 注意:host_ip 必须等于【本机接雷达那块网卡】的 IPv4 地址(不是雷达的 IP)。
-        # 驱动在该地址上 bind UDP 56301/56401 被动收流;填错/换机器 → bind 失败,收不到数据。
-        host_ip: 192.168.1.50
+        # 注意:host_ip 必须等于【本机接雷达那块网卡】的 IPv4 地址(不是雷达的 IP),
+        # 而且要等于【雷达里配置的目的 IP】—— 两者不一致时雷达会把点云推到别处,
+        # 驱动这边 topic 照样存在但永远没数据(ros2 topic hz 一直不出数)。
+        # 2026-10-25 实测:这台 Mid-360 自身 IP 192.168.1.166,目的 IP 配的是
+        # 192.168.1.10(tcpdump 可见 192.168.1.166:56300 -> 192.168.1.10:56301),
+        # 所以这里用 .10,网卡同时保留 .50 作为旧地址。
+        host_ip: 192.168.1.10
         is_topic_name_with_lidar_ip: false # 是否在话题名后面加雷达ip，可以用于区分多个雷达

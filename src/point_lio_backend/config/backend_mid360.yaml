@@ -80,6 +80,18 @@
     output.publish_odom: true
     output.publish_raw_path: false
 
+    # 退出时把 **回环校正后的 map 系点云** 写成 PCD(PCD/backend_map.pcd)。
+    # 和 point_lio 的 pcd_save 不是同一份:那份由 vendored 包在 camera_init 系写,
+    # 没有回环纠正;这份用各关键帧**当前** pose_opt 全量重建,位姿图拉直轨迹的
+    # 效果会体现在文件里。两者叠起来看墙厚,就能判断回环到底改了多少。
+    # 注意密度:关键帧点云是 submap.submap_frames 帧、submap_voxel 0.2 m 抽稀过的,
+    # 比前端那份稀;要更密调小 keyframe.submap_voxel(代价是后端 CPU/内存)。
+    output.save_pcd: true
+    output.pcd_path: PCD/backend_map.pcd    # 相对运行 launch 的目录(P8 约定)
+    # >0: 每 N 秒覆盖写一次(kill -9 / 断电也能留下最近一份);0 = 只在退出时写。
+    # 写入成本是 O(关键帧数) 的全量重建(100 帧约几十 ms,2000 帧数百 ms),别设太小。
+    output.pcd_save_period: 0.0
+
     # ── 运行时 ────────────────────────────────────────────────────────────
     runtime.pending_clouds: 2
     runtime.reset_on_jump_m: 2.0

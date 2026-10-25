@@ -61,6 +61,18 @@ deque<PointCloudXYZI::Ptr> lidar_buffer;
 deque<double> time_buffer;
 deque<sensor_msgs::msg::Imu::ConstSharedPtr> imu_deque;
 
+// ─── LOCAL PATCH P12(见 docs/PATCHES.md)─────────────────────────────────
+// 原始陀螺历史(机体系、未去偏)，只给 publish_frame_body 的逐点 deskew 用。
+// 为什么需要：P4 用"帧尾那一瞬的 ω"补偿整帧点云，角速度在 100 ms 内一变，
+// 就留下 Δθ ≈ ½·(dω/dt)·T² 的残余——起转 0→3 rad/s 约 8.6°，3 m 处 45 cm，
+// 正好是"快速旋转时天花板/墙倾斜重影"的形状。这里按陀螺逐点积分，把那部分消掉。
+struct GyroSample {
+    double t;
+    V3D w;
+};
+deque<GyroSample> gyro_hist;
+constexpr double kGyroHistSec = 2.0;   // 只留最近 2 s，够两帧点云回溯
+
 //surf feature in map
 PointCloudXYZI::Ptr feats_undistort(new PointCloudXYZI());
 PointCloudXYZI::Ptr feats_down_body_space(new PointCloudXYZI());
@@ -357,6 +369,16 @@ void imu_cbk(const sensor_msgs::msg::Imu::SharedPtr msg_in) {
 
     imu_deque.emplace_back(msg);
     last_timestamp_imu = timestamp;
+    // LOCAL PATCH P12：陀螺历史(与 imu_deque 同时入、同一把锁)
+    {
+        GyroSample gs;
+        gs.t = timestamp;
+        gs.w << msg->angular_velocity.x, msg->angular_velocity.y, msg->angular_velocity.z;
+        gyro_hist.push_back(gs);
+        while (gyro_hist.size() > 4 && gyro_hist.front().t < timestamp - kGyroHistSec) {
+            gyro_hist.pop_front();
+        }
+    }
     mtx_buffer.unlock();
     sig_buffer.notify_all();
 }
@@ -585,6 +607,47 @@ void publish_frame_world(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>:
 // 机体系点云的 deskew(运动补偿)开关。置 false 可复现官方行为,用于 A/B 对比。
 static const bool kDeskewBodyCloud = true;
 
+// ─── LOCAL PATCH P12(见 docs/PATCHES.md)─────────────────────────────────
+// 逐点 deskew：用陀螺历史积分出 S(τ) = R(t_ref)ᵀ·R(τ)，再逐点乘。
+// P4 的常量 ω 是这式子在一帧内 ω 不变时的一阶近似；起转/急停时误差见上面的注释。
+// 精度与开销：表按 0.5 ms 网格预积分(一帧 ~200 次 Exp)，每点只做一次 3×3 乘。
+static bool gyroAt(const vector<GyroSample> &h, double t, V3D &out) {
+    if (h.empty()) return false;
+    auto it = std::lower_bound(h.begin(), h.end(), t,
+                               [](const GyroSample &s, double v) { return s.t < v; });
+    if (it == h.begin()) {
+        out = h.front().w;
+        return t >= h.front().t - 0.05;   // 早于历史起点 50 ms 内用最近样本外推
+    }
+    if (it == h.end()) {
+        out = h.back().w;
+        return t <= h.back().t + 0.05;
+    }
+    const GyroSample &a = *(it - 1);
+    const GyroSample &b = *it;
+    const double span = std::max(1e-9, b.t - a.t);
+    const double alpha = std::min(1.0, std::max(0.0, (t - a.t) / span));
+    out = a.w + alpha * (b.w - a.w);
+    return true;
+}
+
+// 从 t_ref 往回积分出每个网格点的 S(k)。失败(历史不足)返回 false，调用方退回常量 ω。
+static bool buildDeskewTable(const vector<GyroSample> &h, double t_beg, double t_ref,
+                             const V3D &bg, double grid, vector<M3D> &S) {
+    const double span = t_ref - t_beg;
+    if (span <= 0.0) return false;
+    const int K = std::max(1, static_cast<int>(std::ceil(span / grid)));
+    S.resize(static_cast<size_t>(K) + 1);
+    S[0] = Eye3d;
+    for (int k = 1; k <= K; ++k) {
+        V3D w;
+        if (!gyroAt(h, t_ref - k * grid, w)) return false;
+        const V3D wb = w - bg;               // 显式落地：Exp 的模板推导不接受 Eigen 表达式
+        S[k] = S[k - 1] * Exp(wb, -grid);
+    }
+    return true;
+}
+
 void publish_frame_body(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pubLaserCloudFull_body) {
 
     if (odom_only) {return;}
@@ -608,15 +671,38 @@ void publish_frame_body(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::
     // 所以要用 R^T 转回机体系;ω 则由 gyro−bg(输入态)或估计值 x_.omg(输出态)给出。
     const bool deskew = kDeskewBodyCloud && imu_en && size > 0;
     const double t_ref = lidar_end_time;
-    V3D omg_body = V3D::Zero();  // 机体系角速度 [rad/s]
+    V3D omg_body = V3D::Zero();  // 机体系角速度 [rad/s](P12 的兜底值)
     V3D vel_body = V3D::Zero();  // 机体系线速度 [m/s]
+    V3D bg = V3D::Zero();        // 陀螺零偏 [rad/s]
     if (deskew) {
         if (!use_imu_as_input) {
             omg_body = kf_output.x_.omg;   // 已经是去偏后的真实角速度(量测方程: gyro−omg−bg=0)
+            bg = kf_output.x_.bg;
             vel_body = kf_output.x_.rot.normalized().conjugate() * kf_output.x_.vel;
         } else {
-            omg_body = angvel_avr - kf_input.x_.bg;  // 输入态的 x_ 里没有 omg,用最近一次陀螺去偏
+            bg = kf_input.x_.bg;
+            omg_body = angvel_avr - bg;  // 输入态的 x_ 里没有 omg,用最近一次陀螺去偏
             vel_body = kf_input.x_.rot.normalized().conjugate() * kf_input.x_.vel;
+        }
+    }
+
+    // LOCAL PATCH P12：逐点积分表。陀螺历史不够(刚启动/IMU 断流)时自动退回 P4 的常量 ω。
+    static const bool kDeskewPerPoint = true;   // false = 退回 P4 的常量 ω(代码内 A/B)
+    static const double kDeskewGrid = 5e-4;     // s
+    std::vector<M3D> deskew_table;
+    bool per_point = false;
+    if (deskew && kDeskewPerPoint) {
+        std::vector<GyroSample> hist;
+        {
+            std::lock_guard<std::mutex> lk(mtx_buffer);
+            hist.assign(gyro_hist.begin(), gyro_hist.end());
+        }
+        per_point = buildDeskewTable(hist, Measures.lidar_beg_time, t_ref, bg,
+                                     kDeskewGrid, deskew_table);
+        static bool warned = false;
+        if (!per_point && !warned) {
+            warned = true;
+            RCLCPP_WARN(logger, "[deskew] 陀螺历史不足,回退常量 ω(检查 /livox/imu 是否在发、时间戳是否单调)");
         }
     }
 
@@ -633,7 +719,14 @@ void publish_frame_body(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::
         const V3D p(laserCloudIMUBody->points[i].x,
                     laserCloudIMUBody->points[i].y,
                     laserCloudIMUBody->points[i].z);
-        const V3D p_ref = Exp(omg_body, -dt) * p - dt * vel_body;
+        V3D p_ref;
+        if (per_point) {
+            int k = static_cast<int>(std::lround(dt / kDeskewGrid));
+            k = std::max(0, std::min(k, static_cast<int>(deskew_table.size()) - 1));
+            p_ref = deskew_table[k] * p - dt * vel_body;
+        } else {
+            p_ref = Exp(omg_body, -dt) * p - dt * vel_body;   // P4 兜底
+        }
         laserCloudIMUBody->points[i].x = p_ref(0);
         laserCloudIMUBody->points[i].y = p_ref(1);
         laserCloudIMUBody->points[i].z = p_ref(2);

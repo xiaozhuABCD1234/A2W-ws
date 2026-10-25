@@ -15,6 +15,7 @@
 #include <visualization_msgs/msg/marker_array.hpp>
 
 #include <pcl/filters/voxel_grid.h>
+#include <pcl/io/pcd_io.h>
 
 #include <algorithm>
 #include <atomic>
@@ -23,6 +24,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -98,6 +100,9 @@ class BackendNode : public rclcpp::Node {
     if (worker_.joinable()) {
       worker_.join();
     }
+    // worker 已退出，keyframes_ / map_accum_ 不再有并发写：退出时落一份地图。
+    // 必须在这里而不是信号回调里做——回调里拿不到 worker 的独占权。
+    saveMapPcd("shutdown");
   }
 
  private:
@@ -195,6 +200,10 @@ class BackendNode : public rclcpp::Node {
     out.publish_odom = declareParam<bool>("output.publish_odom", out.publish_odom);
     out.publish_raw_path =
         declareParam<bool>("output.publish_raw_path", out.publish_raw_path);
+    out.save_pcd = declareParam<bool>("output.save_pcd", out.save_pcd);
+    out.pcd_path = declareParam<std::string>("output.pcd_path", out.pcd_path);
+    out.pcd_save_period =
+        declareParam<double>("output.pcd_save_period", out.pcd_save_period);
 
     auto& rt = params_.runtime;
     rt.pending_clouds =
@@ -542,6 +551,17 @@ class BackendNode : public rclcpp::Node {
       if (loop.has_value()) {
         runOptimization();
       }
+
+      // 定期落盘（可选）：默认 0 = 只在退出时写。设为 >0 后每 N 秒覆盖写一次，
+      // 这样 kill -9 / 断电也能留下最近一份（PCD 只有在正常退出时才写的坑见 P8）。
+      if (params_.output.save_pcd && params_.output.pcd_save_period > 0.0) {
+        const auto t_pcd = std::chrono::steady_clock::now();
+        if (std::chrono::duration<double>(t_pcd - last_pcd_save_).count() >=
+            params_.output.pcd_save_period) {
+          saveMapPcd("periodic");
+          last_pcd_save_ = t_pcd;
+        }
+      }
       if (params_.runtime.profile) {
         RCLCPP_INFO(get_logger(),
                     "[profile] kf=%d pts=%zu detect=%.1fms publish=%.1fms queue=%zu",
@@ -720,6 +740,51 @@ class BackendNode : public rclcpp::Node {
     voxel.setInputCloud(in);
     voxel.filter(*filtered);
     return filtered;
+  }
+
+  // ── 地图落盘 ────────────────────────────────────────────────────────────
+  // 存的是"回环校正后的 map 系点云"，和 point_lio 的 pcd_save 有两点不同：
+  //   1. 坐标：map(后端) vs camera_init(前端)，前端那份没有回环纠正；
+  //   2. 位姿：这里用每条关键帧**当前**的 pose_opt 全量重建，所以位姿图把历史
+  //      轨迹拉直之后，早先关键帧的点也会跟着动。
+  // 想验证"回环到底改了多少"，把这两份 PCD 叠起来看墙厚就够。
+  // 调用时机：worker 持有独占权（processPair 内）或 worker 已 join（析构）。
+  void saveMapPcd(const char* reason) {
+    if (!params_.output.save_pcd) {
+      return;
+    }
+    if (keyframes_.empty()) {
+      RCLCPP_WARN(get_logger(), "[map_save] skip (%s): no keyframes yet", reason);
+      return;
+    }
+    const auto t0 = std::chrono::steady_clock::now();
+    PointCloudT::Ptr full(new PointCloudT());
+    appendKeyframesToMap(0, full.get());
+    full = voxelize(full);
+
+    const std::filesystem::path path(params_.output.pcd_path);
+    const std::string path_str = path.string();
+    std::error_code ec;
+    if (path.has_parent_path() && !path.parent_path().empty()) {
+      std::filesystem::create_directories(path.parent_path(), ec);
+      if (ec) {
+        RCLCPP_ERROR(get_logger(), "[map_save] mkdir %s failed: %s",
+                     path.parent_path().string().c_str(), ec.message().c_str());
+        return;
+      }
+    }
+
+    const int ret = pcl::io::savePCDFileBinary(path_str, *full);
+    const double ms = std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now() - t0).count();
+    if (ret != 0) {
+      RCLCPP_ERROR(get_logger(), "[map_save] write %s failed (ret=%d)",
+                   path_str.c_str(), ret);
+      return;
+    }
+    RCLCPP_INFO(get_logger(),
+                "[map_save] %s -> %s : %zu points, %zu keyframes, %.0f ms",
+                reason, path_str.c_str(), full->size(), keyframes_.size(), ms);
   }
 
   // 地图点云是增量维护的：每来一个关键帧只把"新增的那几帧"变换+体素化后并进
@@ -1038,6 +1103,7 @@ class BackendNode : public rclcpp::Node {
   PointCloudT::Ptr map_accum_;          // map 系增量累积点云（worker 线程独占）
   size_t map_keyframes_applied_ = 0;    // map_accum_ 已并入到第几个关键帧
   bool map_dirty_ = false;              // 历史位姿被优化改过，下次发布需全量重建
+  std::chrono::steady_clock::time_point last_pcd_save_{};  // output.pcd_save_period 计时
   Eigen::Isometry3d last_rebuild_correction_ = Eigen::Isometry3d::Identity();
 };
 

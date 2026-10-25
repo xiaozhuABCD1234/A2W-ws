@@ -9,9 +9,12 @@ log/
 #  ROS 运行时产物
 # ============================================================
 .ros/
+.cache/
 *.bag
 *.db3
 *.mcap
+# 回放用数据包(从 nx-old 的 ~/bags 拷进来,不进版本库)
+bags/
 
 # ============================================================
 #  point_lio 运行时产物
@@ -23,6 +26,8 @@ src/point_lio_ros2/Log/pos_log.txt
 src/point_lio_ros2/Log/mat_out.txt
 src/point_lio_ros2/Log/imu_pbp.txt
 *.pcd
+# 俯视预览图(matplotlib 生成,运行时产物)
+PCD/*.png
 
 # ============================================================
 #  上游演示资源

@@ -291,11 +291,14 @@ def find_ws(start):
     return None
 
 
-def start_backend(ws, params, log_path):
+def start_backend(ws, params, log_path, pcd_out):
     env = os.environ.copy()
     env.setdefault('ROS_DOMAIN_ID', '77')
+    # 覆盖落盘路径：后端默认会写 ./PCD/backend_map.pcd，而测试的 cwd 就是工作区，
+    # 不覆盖的话一次 replay 就会把真机跑出来的正式地图冲掉。
     cmd = ['ros2', 'run', 'point_lio_backend', 'point_lio_backend_node',
-           '--ros-args', '--params-file', params]
+           '--ros-args', '--params-file', params,
+           '-p', 'output.pcd_path:=' + pcd_out]
     log = open(log_path, 'wb')
     proc = subprocess.Popen(cmd, cwd=ws, env=env, stdout=log, stderr=subprocess.STDOUT,
                             start_new_session=True)
@@ -402,7 +405,8 @@ def main():
 
     # 起后端
     log_path = os.path.join(tempfile.gettempdir(), 'backend_replay_node.log')
-    proc, log = start_backend(ws, params, log_path)
+    pcd_out = os.path.join(tempfile.gettempdir(), 'backend_replay_map_out.pcd')
+    proc, log = start_backend(ws, params, log_path, pcd_out)
 
     rclpy.init()
     node = Harness()

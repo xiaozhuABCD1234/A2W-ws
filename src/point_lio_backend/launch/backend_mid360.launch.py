@@ -7,11 +7,26 @@
     ros2 launch point_lio_backend backend_mid360.launch.py params_file:=/path/to/x.yaml
 """
 
+import os
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+
+
+def _clean_ld_library_path():
+    """剔除 /opt/MVS：其旧 libusb 会导致后端加载 PCL 失败（见 docs/PATCHES.md）。"""
+    raw = os.environ.get('LD_LIBRARY_PATH', '')
+    paths = [p for p in raw.split(':') if p]
+    kept = [p for p in paths if '/opt/MVS' not in p]
+    if len(kept) == len(paths):
+        return {}
+    print('[backend_mid360] /opt/MVS in LD_LIBRARY_PATH (old libusb breaks PCL), '
+          'stripped for the backend node')
+    return {'LD_LIBRARY_PATH': ':'.join(kept) if kept
+            else '/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu'}
 
 
 def generate_launch_description():
@@ -28,6 +43,7 @@ def generate_launch_description():
         name='point_lio_backend',
         output='screen',
         parameters=[LaunchConfiguration('params_file')],
+        additional_env=_clean_ld_library_path(),
     )
 
     return LaunchDescription([params_arg, backend_node])
