@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# commit-msg:校验提交信息格式,规则详见 docs/git-convention.md
+# commit-msg:校验提交信息格式
 set -euo pipefail
 
 . "$(dirname "$0")/lib.sh"

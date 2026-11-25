@@ -227,8 +227,7 @@ GraphSolveResult solveOnce(const std::vector<Keyframe>& keyframes,
 
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
-  // 达到 max_num_iterations 但解可用（NO_CONVERGENCE）不算失败，只有
-  // FAILURE/USER_FAILURE 才丢弃；随后再校验所有位姿有限。
+  // NO_CONVERGENCE 不算失败，只有 FAILURE/USER_FAILURE 才丢弃
   if (!summary.IsSolutionUsable()) return result;
 
   result.poses.resize(n);
@@ -252,17 +251,17 @@ bool PoseGraph::optimize(std::vector<Keyframe>& keyframes,
                          std::vector<bool>* loop_active) const {
   const std::size_t n = keyframes.size();
 
-  // 活跃状态：输入 active 为初值，外点门控只会关闭不会重新打开。
+  // 门控只会关闭 active，不会重新打开
   std::vector<bool> active(loops.size(), false);
   for (std::size_t k = 0; k < loops.size(); ++k) active[k] = loops[k].active;
 
-  // id -> index，不假设 id 等于下标。
+  // id -> index（id 不等于下标）
   std::unordered_map<int, std::size_t> id_to_index;
   id_to_index.reserve(n * 2);
   for (std::size_t i = 0; i < n; ++i) {
     id_to_index.emplace(keyframes[i].id, i);
   }
-  // 端点不存在或自环的回环直接视为无效。
+  // 端点不存在或自环的回环无效
   for (std::size_t k = 0; k < loops.size(); ++k) {
     if (!active[k]) continue;
     const auto it_from = id_to_index.find(loops[k].from);
@@ -276,8 +275,7 @@ bool PoseGraph::optimize(std::vector<Keyframe>& keyframes,
   if (loop_active != nullptr) *loop_active = active;
   if (n == 0) return true;
 
-  // 初值：优先沿用上一版 pose_opt（增量优化更稳）。
-  // 首次调用时 pose_opt 可能还是默认的单位阵，此时退回 pose_raw。
+  // 初值沿用上一版 pose_opt，首次调用退回 pose_raw
   bool all_opt_identity = true;
   bool any_raw_non_identity = false;
   for (const auto& kf : keyframes) {
@@ -300,10 +298,7 @@ bool PoseGraph::optimize(std::vector<Keyframe>& keyframes,
     return true;
   }
 
-  // 求解 + 外点门控重优化（最多 2 轮）。
-  // 多回环互相冲突时，一次删掉所有超限回环会把真回环一起误删（折中位姿让两者
-  // 残差都超限）。所以每轮保留归一化残差最小的一条，只删其余超限者，重优化后
-  // 再评估；只有一条超限时直接删它。最多 2 轮，与规格一致。
+  // 门控最多 2 轮：一次删光超限回环会误删真回环，每轮保留残差最小的一条
   GraphSolveResult current;
   std::vector<Eigen::Isometry3d> guess = initial;
   auto solve_current = [&]() -> bool {

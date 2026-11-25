@@ -302,8 +302,7 @@ TEST(ScanContext, InvalidDescriptorDistance) {
   EXPECT_EQ(sc.distance(a, a), std::numeric_limits<double>::max());
 }
 
-// 静止/原地打转时，SC 会不断匹配到早期关键帧；若不设行程下限，就会刷出
-// 一堆"位移恒等"的假回环（真机静止实测过）。这里验证门限确实拦住了它。
+// 静止时 SC 会不断匹配早期关键帧,验证行程门限能拦住假回环
 TEST(LoopDetector, RejectsStationarySelfMatch) {
   ScanContextParams sc_params = defaultParams();
   sc_params.min_travel_m = 3.0;

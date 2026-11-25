@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 规约层共享规则库,被 .githooks/ 下各钩子 source
+# 规约层共享规则库
 
 ALLOWED_TYPES=(feat fix perf docs style refactor test build ci chore revert merge)
 SCOPE_WHITELIST=()

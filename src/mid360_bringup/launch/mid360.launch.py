@@ -3,31 +3,20 @@
     ros2 launch mid360_bringup mid360.launch.py
     ros2 launch mid360_bringup mid360.launch.py show_rviz:=false
     ros2 launch mid360_bringup mid360.launch.py pcd_save:=true      # 临时开 PCD 落盘(先验地图)
-    ros2 launch mid360_bringup mid360.launch.py pcd_save:=false     # 建图时不落盘(省内存/CPU)
-    ros2 launch mid360_bringup mid360.launch.py backend:=false      # 关后端回环/位姿图
-                                                                    # (octomap 退回 camera_init 系)
+    ros2 launch mid360_bringup mid360.launch.py backend:=false      # 关后端,octomap 退回 camera_init 系
 
-point_lio 的 rviz 固定关掉;rviz 由本 launch 直接起。
+point_lio 的 rviz 固定关掉,rviz 由本 launch 直接起。驱动为本地包
+mid360_driver:UDP 收流直接发 /livox/lidar(PointCloud2)与 /livox/imu,
+没有 livox_ros_driver2 的 xfer_format 选项。
 
-驱动换成本地包 mid360_driver:它直接 UDP 收流并发布 /livox/lidar
-(sensor_msgs/PointCloud2)与 /livox/imu(sensor_msgs/Imu),没有
-livox_ros_driver2 的 xfer_format 选项(点云恒为 PointCloud2)。
+⚠️ 参数名用 show_rviz 而非 rviz:include 会把参数写进共享的
+launch_configurations,传 'rviz' 会把父级自己的 'rviz' 也改成 false,
+导致引用它的节点条件全变假。改名后互不干扰。调参(resolution 等)
+在 octomap_mid360.launch.py 层做,本 launch 不转发。
 
-⚠️ 参数名用 `show_rviz` 而不是 `rviz` 的原因:
-launch 的 IncludeLaunchDescription 会把 include 参数展开成
-SetLaunchConfiguration 写进**共享**的 launch_configurations(见
-ros2/launch jazzy include_launch_description.py)。给 point_lio 传
-'rviz':'false' 会连带把父级自己的 'rviz' 改成 'false' → 后面引用
-LaunchConfiguration('rviz') 的节点条件全变假。改名后互不干扰。
-
-注:一键模式下分辨率/量程等调参在 octomap_mid360.launch.py 那层做,
-本 launch 不转发(避免同类问题)。
-
-启动前会先跑 scripts/preflight.sh 做一次静态自检(mid360_driver 的
-PointCloud2/Imu 与 point_lio 的 lidar_type/timestamp_unit 是否匹配、
-话题名、host_ip、octomap 是否吃机体系点云、src 是否忘了 build)。
-不通过则直接拒绝启动 —— 因为这类错配的现场表现是“节点都起来了,
-但 rviz 里永远没有点”,靠日志很难定位。
+启动前先跑 preflight.sh 静态自检(驱动与 point_lio 的
+lidar_type/timestamp_unit/话题名/host_ip/octomap 输入/src 是否 build)。
+不通过直接拒绝启动 —— 这类错配的现场表现是“节点都在,rviz 里永远没点”。
 临时跳过:MID360_SKIP_PREFLIGHT=1 ros2 launch ...
 """
 
@@ -54,14 +43,11 @@ def _has_package(name):
 
 
 def _prepare_rviz_config(template_path, fixed_frame, drop_octomap_plugin):
-    """按当前环境生成一份 rviz 配置,返回临时文件路径。
+    """按当前环境生成 rviz 配置,返回临时文件路径。
 
-    解决两个"环境不全就整个 launch 失败/报一堆插件错"的问题:
-      1. World 系在 backend 开启时是 map、关闭时是 camera_init,而 Fixed Frame
-         写在 rviz 文件里 —— 直接改模板会污染仓库,所以复制一份再替换。
-      2. 本机没装 octomap_rviz_plugins 时,配置里 octomap_rviz_plugins/OccupancyGrid
-         这个 display 类加载不了(rviz 面板里一堆红字)。把这一段删掉即可,
-         其余显示(点云/path/marker/TF)照常。
+    1) Fixed Frame 在 backend 开/关时分别是 map/camera_init,复制一份替换,
+       不改模板(避免污染仓库);
+    2) 没装 octomap_rviz_plugins 时删掉对应 display,其余显示照常。
     """
     with open(template_path, encoding='utf-8') as f:
         lines = f.readlines()
@@ -95,11 +81,9 @@ def _prepare_rviz_config(template_path, fixed_frame, drop_octomap_plugin):
 
 
 def _run_preflight():
-    """启动前跑静态自检,不通过就抛异常(launch 不会启动任何节点)。
+    """启动前跑静态自检,不通过就抛异常(launch 不启动任何节点)。
 
-    在 generate_launch_description 阶段同步执行,只读配置与源码,
-    不依赖 ROS 节点,约 0.2 s。退出码 2 = 环境不完整(比如系统安装
-    没有 src/),只提醒不拦;退出码 1 = 配置真的不自洽,拦截。
+    同步执行,只读配置与源码。退出码 2 = 环境不完整,只提醒不拦;1 = 不自洽,拦截。
     """
     if os.environ.get('MID360_SKIP_PREFLIGHT') == '1':
         print('[preflight] 已按 MID360_SKIP_PREFLIGHT=1 跳过')
@@ -118,8 +102,7 @@ def _run_preflight():
     proc = subprocess.run([script, '--quiet'], capture_output=True, text=True)
     print(proc.stdout, end='')
     if proc.returncode == 1:
-        # 先打在 stdout,再抛异常 —— 否则用户只能看到 launch 的
-        # InvalidLaunchFileError("可能是语法错"),会把方向带偏。
+        # 先打到 stdout 再抛异常:直接抛会被包成 InvalidLaunchFileError("可能是语法错"),带偏方向。
         print('[preflight] ❌ 配置不自洽,拒绝启动:见上方 FAIL 项。', flush=True)
         print('[preflight]   修好后重试;确需强行启动:MID360_SKIP_PREFLIGHT=1',
               flush=True)
@@ -136,11 +119,8 @@ def generate_launch_description():
         description='启动 rviz2(单窗口:octomap 体素 + LIO 点云 + path)。'
                     '不用 rviz:=true —— 见文件头注释,会被点_lio 的 include 污染')
 
-    # LOCAL PATCH P7(见 docs/PATCHES.md):把「是否落盘 PCD」透传给 point_lio 的
-    # mapping launch。留空 = 用 point_lio 的 config/mid360.yaml(约定 A:yaml 是
-    # 唯一真相源);显式传 true/false 才覆盖。
-    # 这是唯一不需要 colcon build 的开关方式:yaml 改了要 build 才同步到 install/,
-    # 而 launch 参数是启动时生效的。
+    # P7:透传「是否落盘 PCD」给 point_lio。留空 = 用 yaml
+    # (约定 A);显式传 true/false 才覆盖。launch 参数是唯一免 build 的开关。
     pcd_save_arg = DeclareLaunchArgument(
         'pcd_save', default_value='',
         description='是否把建图点云落盘(先验地图用)。留空 = 用 point_lio 的 yaml '
@@ -177,13 +157,10 @@ def generate_launch_description():
     )
 
     def _backend_include(context):
-        """backend:=true 时 include 后端;包找不到就给出可操作的报错。
+        """backend:=true 时 include 后端,包找不到就给出可操作报错。
 
-        为什么不用 IncludeLaunchDescription + IfCondition:
-        当终端环境是在新增 point_lio_backend 之前 source 的,AMENT_PREFIX_PATH 里
-        没有它,launch 会抛
-          "package 'point_lio_backend' not found, searching: [...]"
-        —— 看不出是"环境旧了"。这里前置判断并直接说要重新 source。
+        不用 IfCondition:环境旧(在新增该包前 source)时 launch 只会报
+        "package not found",看不出是环境旧了,这里前置判断并提示重新 source。
         """
         raw = context.perform_substitution(LaunchConfiguration('backend')).strip().lower()
         if raw in ('0', 'false', 'no', 'off', ''):
@@ -209,13 +186,8 @@ def generate_launch_description():
     def _octomap_and_rviz(context):
         """按 backend / octomap 可用性组装 octomap + rviz。
 
-        backend=true: point_lio_backend 发布 map->camera_init 纠偏 TF,octomap 用 map 系;
-        backend=false: 完全退回改造前行为(camera_init 系)。
-
-        octomap_server / octomap_rviz_plugins 是**系统包**(ros-jazzy-octomap-server 等),
-        没装时不能把整个一键启动拖垮 —— 驱动 + point_lio + 后端才是核心链路。
-        所以:没装 octomap_server 就跳过 octomap(大声提示装法),没装 rviz 插件就
-        从配置里去掉那个 display。核心链路照常可用。
+        backend=true 时 octomap 用 map 系(后端发布 map->camera_init),false 时退回
+        camera_init 系。octomap 系统包没装时只跳过对应功能并提示,不拖垮核心链路。
         """
         def _is_on(name):
             return context.perform_substitution(
@@ -254,10 +226,9 @@ def generate_launch_description():
                 template,
                 fixed_frame='map' if use_backend else 'camera_init',
                 drop_octomap_plugin=not has_octomap_rviz)
-            # 关键:octomap_rviz_plugins 2.1.0 的 .so 缺 liboctomap 的 DT_NEEDED,
-            # rviz2 又自己不加载 octomap → 不注入的话 OccupancyGrid 显示 dlopen 会报
-            # undefined symbol OcTreeStamped。预加载 1.9.7 即解决(实测符号全解析)。
-            # 用 additional_env 而非 env:env= 会替换整个环境,把 LD_LIBRARY_PATH 冲掉。
+            # octomap_rviz_plugins 2.1.0 的 .so 缺 liboctomap 的 DT_NEEDED,
+            # 不预加载会 dlopen 失败(undefined symbol OcTreeStamped)。
+            # 必须用 additional_env:env= 会替换整个环境,冲掉 LD_LIBRARY_PATH。
             actions.append(Node(
                 package='rviz2',
                 executable='rviz2',

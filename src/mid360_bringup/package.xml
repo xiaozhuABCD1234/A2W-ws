@@ -14,13 +14,11 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <!-- 运行时依赖 -->
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>rviz2</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
 
-  <!-- 被集成的节点 -->
   <exec_depend>point_lio</exec_depend>
   <exec_depend>mid360_driver</exec_depend>
   <exec_depend>pcl_ros</exec_depend>

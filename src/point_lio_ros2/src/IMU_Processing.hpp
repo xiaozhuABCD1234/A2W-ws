@@ -37,14 +37,11 @@ public:
 
     void Reset();
 
-    //void Reset(double start_timestamp, const sensor_msgs::msg::Imu::ConstSharedPtr &lastimu);
-
     void Process(const MeasureGroup &meas, const PointCloudXYZI::Ptr &pcl_un_);
 
     void Set_init(Eigen::Vector3d &tmp_gravity, Eigen::Matrix3d &rot);
 
     ofstream fout_imu;
-    // double first_lidar_time;
     int lidar_type;
     bool imu_en;
     V3D mean_acc, gravity_;
@@ -143,7 +140,6 @@ void ImuProcess::Process(const MeasureGroup &meas, const PointCloudXYZI::Ptr &cu
 void ImuProcess::Set_init(Eigen::Vector3d &tmp_gravity, Eigen::Matrix3d &rot) {
     /** 1. initializing the gravity, gyro bias, acc and gyro covariance
      ** 2. normalize the acceleration measurenments to unit gravity **/
-    // V3D tmp_gravity = - mean_acc / mean_acc.norm() * G_m_s2; // state_gravity;
     M3D hat_grav;
     hat_grav << 0.0, gravity_(2), -gravity_(1),
             -gravity_(2), 0.0, gravity_(0),

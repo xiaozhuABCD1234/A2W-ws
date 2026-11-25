@@ -17,7 +17,7 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def _clean_ld_library_path():
-    """剔除 /opt/MVS：其旧 libusb 会导致后端加载 PCL 失败（见 docs/PATCHES.md）。"""
+    """剔除 /opt/MVS：其旧 libusb 会导致后端加载 PCL 失败。"""
     raw = os.environ.get('LD_LIBRARY_PATH', '')
     paths = [p for p in raw.split(':') if p]
     kept = [p for p in paths if '/opt/MVS' not in p]

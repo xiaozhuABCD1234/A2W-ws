@@ -1,26 +1,16 @@
 #!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────────────────────
-# check_tf.sh —— 一键启动后"rviz 里看不到东西 / Could not transform"的定位工具
-#
-# 用法(先 source 工作空间):
-#   bash src/mid360_bringup/scripts/check_tf.sh
-#   bash src/mid360_bringup/scripts/check_tf.sh --frames 8
-#
-# 做四件事:
-#   1) 列出链路上的节点,确认后端/前端都在;
-#   2) 采 /tf n 秒,汇总所有 "父帧 -> 子帧" 边(有 map->camera_init 才能用 map 系);
-#   3) 逐个打印 rviz/octomap 关心的话题的 frame_id 与频率;
-#   4) 用「当前时间」查一次 map->camera_init(和 rviz 的判定方式一致),给出结论。
-#
-# 退出码:0 正常 / 1 有问题(会打印可操作的下一步)
-# ─────────────────────────────────────────────────────────────────────────────
+# check_tf.sh —— 一键启动后"rviz 看不到东西 / Could not transform"的定位工具
+# 用法: bash src/mid360_bringup/scripts/check_tf.sh [--frames N](先 source 工作空间)
+# 步骤:1) 列节点 2) 采 /tf 汇总父子帧边 3) 打印关键话题 frame_id/频率
+#       4) 用当前时间查 map->camera_init(与 rviz 判定一致)
+# 退出码:0 正常 / 1 有问题(打印可操作的下一步)
 set -uo pipefail
 
 FRAMES=5
 while [ $# -gt 0 ]; do
   case "$1" in
     --frames) FRAMES="${2:-5}"; shift ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
     *) echo "未知参数:$1" >&2; exit 2 ;;
   esac
   shift

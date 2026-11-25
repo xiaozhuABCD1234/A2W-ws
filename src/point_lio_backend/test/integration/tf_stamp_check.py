@@ -102,9 +102,7 @@ def main():
     def on_cloud(msg):
         nonlocal checked
         checked += 1
-        # 不能在这里阻塞等 TF:回调跑在单线程 executor 里,sleep 会让 TF 消息
-        # 也收不进来,重试永远失败。这里只入队,由主循环边 spin 边重试
-        # —— 这正是 rviz 的 message filter 的做法。
+        # 回调跑在单线程 executor 里,阻塞等 TF 会收不到 TF:只入队,主循环边 spin 边重试
         pending.append([time.time(), None, msg.header.frame_id, msg.header.stamp])
 
     def drain_pending(timeout_sec=0.2):

@@ -103,10 +103,7 @@ LoopConstraint makeLoop(int from, int to, const Iso& T_from_to, double offset_x 
   return loop;
 }
 
-// 合成单回环场景专用参数。
-// 生产配置（config/backend_mid360.yaml）里一个回环周期会累积多条回环边；
-// 本测试只有 1~2 条回环边，要闭合 9x10 m 矩形上米级的初始回环误差，
-// 需要让回环权重与 odom 同量级，并放大 Huber 尺度，避免真回环被当成外点降权。
+// 合成单回环专用参数:只有 1~2 条回环边,回环权重与 odom 同量级并放大 Huber,防真回环被降权
 GraphParams syntheticGraphParams() {
   GraphParams params;
   params.odom_trans_sigma = 0.02;

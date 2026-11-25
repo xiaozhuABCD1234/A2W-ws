@@ -154,4 +154,3 @@ void readParameters(shared_ptr<rclcpp::Node> &nh) {
     nh->get_parameter("pcd_save.pcd_save_en", pcd_save_en);
     nh->get_parameter("pcd_save.interval", pcd_save_interval);
 }
-

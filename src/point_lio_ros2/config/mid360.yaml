@@ -1,11 +1,6 @@
 /**:
     ros__parameters:
-        # LOCAL PATCH P2(见 docs/PATCHES.md):上游 mid360.yaml 无此两处改动
-        # tf 的 child frame。上游默认 "aft_mapped",但 /cloud_registered_body
-        # 的 header.frame_id 在 laserMapping.cpp 里是硬编码的 "body",
-        # 两者不一致 → octomap_server 用 lookupTransform(camera_init, body)
-        # 会直接失败(表现为 Message Filter dropping / Transform error)。
-        # 统一成 body。
+        # LOCAL PATCH P2:上游为 aft_mapped;/cloud_registered_body 的 frame_id 硬编码为 body,须一致
         odom_child_frame_id: "body"
 
         common:
@@ -21,9 +16,7 @@
         preprocess:
             lidar_type: 1      # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR
             scan_line: 4
-            # LOCAL PATCH P9(见 docs/PATCHES.md):上游为 3(nanosecond)。
-            # mid360_driver 的 timestamp 字段是 float64 绝对 Unix 秒,所以设 0(SEC)。
-            # 设错不会报错,只会让 curvature 差 1000 倍 —— 静默失去 deskew。
+            # LOCAL PATCH P9:mid360_driver 的 timestamp 是绝对 Unix 秒,上游的 ns 会静默失去 deskew
             timestamp_unit: 0   # the unit of time/t field in the PointCloud2 rostopic: 0-second, 1-milisecond, 2-microsecond, 3-nanosecond.
             blind: 0.5
 
@@ -34,9 +27,7 @@
             imu_time_inte: 0.005 # = 1 / frequency of IMU
             satu_acc: 3.0 # the saturation value of IMU's acceleration. not related to the units
             satu_gyro: 35.0 # the saturation value of IMU's angular velocity. not related to the units
-            # LOCAL PATCH P10(见 docs/PATCHES.md):上游为 1.0(g 为单位)。
-            # mid360_driver 发布 IMU 时已把原始 g 值乘 9.81,所以这里是 m/s^2;
-            # 代码里 acc*G_m_s2/acc_norm,若仍用 1.0 会把加速度再放大 9.81 倍。
+            # LOCAL PATCH P10:mid360_driver 发的 IMU 已是 m/s^2,上游的 1.0 会再放大 9.81 倍
             acc_norm: 9.81 # 1.0 for g as unit, 9.81 for m/s^2 as unit of the IMU's acceleration
             lidar_meas_cov: 0.01 # 0.001
             acc_cov_output: 500.0
@@ -62,38 +53,21 @@
         odometry:
             publish_odometry_without_downsample: false
 
-        # ── 降采样(注意:这几项是**顶层**参数,不在 mapping/preprocess 命名空间下)──
-        # filter_size_surf:逐帧把扫描体素降采样后才送进逐点 EKF,同时决定
-        #   /cloud_registered(世界系点云)的密度 —— 它就是这份点云看着“稀/卡”的原因:
-        #   原先 yaml 没写这项,取代码默认 0.5 m,于是只有 ~900 点/帧
-        #   (而喂给 octomap 的 /cloud_registered_body 有 ~4300 点)。
-        #   0.5 → 0.25:密度约 2~4 倍,约束更足;代价是逐点更新数变多、CPU 上升一档。
-        # filter_size_map:ikd-Tree 地图体素尺寸,0.5 不动。
-        # 另两项同样是代码默认、yaml 未写:point_filter_num: 2(预处理抽点)、
-        #   space_down_sample: true(置 false 则 filter_size_surf 失效)。
-        # LOCAL PATCH P2(见 docs/PATCHES.md):上游 mid360.yaml 无此段。
+        # 降采样(顶层参数)。LOCAL PATCH P2:上游 yaml 未写,取代码默认 0.5。
+        # filter_size_surf 决定 /cloud_registered 密度:0.5 约 900 点/帧,0.25 约 2~4 倍,CPU 上升一档。
+        # filter_size_map 为 ikd-Tree 地图体素尺寸。space_down_sample 置 false 则 filter_size_surf 失效。
         filter_size_surf: 0.25
         filter_size_map: 0.5
 
         publish:
             path_en: true                 # false: close the path output
             scan_publish_en: true         # false: close all the point cloud output
-            scan_bodyframe_pub_en: true   # LOCAL PATCH P2:上游为 false;true 才会发 /cloud_registered_body
-            # ↑ 置 true 才会发 /cloud_registered_body(机体系点云)。
-            #   octomap_server 必须吃机体系点云:它把
-            #   lookupTransform(frame_id, cloud.frame_id) 的平移当作射线起点,
-            #   喂世界系的 /cloud_registered 会让射线全从世界原点射出,自由空间是错的。
+            scan_bodyframe_pub_en: true   # LOCAL PATCH P2:octomap 必须吃机体系点云,否则射线全从原点射出
 
         pcd_save:
-            # LOCAL PATCH P6(见 docs/PATCHES.md 的 D 项):上游为 false。
-            # 为什么要开:先验点云是重定位/先验地图的前置资产,见 docs/LOCALIZATION.md 的 P0。
-            # 写盘时机:节点【正常退出】(Ctrl+C)时写一次 —— laserMapping.cpp:1358 在主循环之后,
-            #   kill -9 / 断电 / 崩溃 = 什么都不写。
-            # 写到哪里:ROOT_DIR/PCD/scans.pcd = src/point_lio_ros2/PCD/scans.pcd
-            #   (ROOT_DIR 是编译期烧进二进制的【源码】目录,不是 install/;*.pcd 已在 .gitignore)
-            # interval 为什么留 -1:实测 /cloud_registered 1532 点/帧 → pcl_wait_save 增长
-            #   ≈0.5 MB/s 内存、文件 ≈0.25 MB/s → 本机 11 GiB 空闲下,单文件在 ~40 min 内安全。
-            #   要跑长测再改 6000(10 min/文件);代价是产出多个 scans_<i>.pcd,喂 NDT 前得先合并。
+            # LOCAL PATCH P6:上游为 false。先验点云用于重定位/先验地图。
+            # 只在正常退出(Ctrl+C)时写 ROOT_DIR/PCD/scans.pcd(编译期源码目录),kill -9 不写。
+            # interval=-1 单文件内存增长约 0.5 MB/s,40 min 内安全;长测改 6000(10 min/文件)。
             pcd_save_en: true
             interval: -1                 # how many LiDAR frames saved in each pcd file;
             # -1 : all frames will be saved in ONE pcd file, may lead to memory crash when having too much frames.

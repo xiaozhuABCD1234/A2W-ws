@@ -82,7 +82,6 @@ std::vector<int> time_compressing(const PointCloudXYZI::Ptr &point_cloud)
   int points_size = point_cloud->points.size();
   int j = 0;
   std::vector<int> time_seq;
-  // time_seq.clear();
   time_seq.reserve(points_size);
   for(int i = 0; i < points_size - 1; i++)
   {

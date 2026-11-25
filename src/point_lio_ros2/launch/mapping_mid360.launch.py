@@ -9,13 +9,8 @@ from launch_ros.substitutions import FindPackageShare
 
 
 def _clean_ld_library_path():
-    """LOCAL PATCH P11(见 docs/PATCHES.md):剔除 /opt/MVS 的旧 libusb。
-
-    本机 ~/.bashrc 把 /opt/MVS/lib/64 放在 LD_LIBRARY_PATH 最前面,里面的
-    libusb-1.0.so.0 缺少 libusb_set_option;而系统 libpcl_io.so.1.14 依赖该符号,
-    于是 pointlio_mapping 启动即 `symbol lookup error` 并 exit 127(rviz 随后报
-    Frame [camera_init] does not exist)。只对 laserMapping 进程剔除这条路径,
-    不影响需要 MVS 相机的其他节点。
+    """LOCAL PATCH P11:剔除 /opt/MVS 的旧 libusb(缺 libusb_set_option,会让 PCL 启动即 symbol lookup error)。
+    只作用于 laserMapping 进程。
     """
     raw = os.environ.get('LD_LIBRARY_PATH', '')
     paths = [p for p in raw.split(':') if p]
@@ -31,7 +26,7 @@ def _clean_ld_library_path():
 def _laser_mapping_node(context):
     """组装 laserMapping 节点(参数约定 A:yaml 优先,只有显式传参才覆盖)。
 
-    LOCAL PATCH P7(见 docs/PATCHES.md):新增 launch 参数 `pcd_save`,
+    LOCAL PATCH P7:新增 launch 参数 `pcd_save`,
     用来在**不改 yaml、不重新 colcon build** 的前提下开关 PCD 落盘。
 
     为什么非得用 OpaqueFunction:节点 parameters 列表里排在后面的项覆盖
@@ -43,15 +38,8 @@ def _laser_mapping_node(context):
             FindPackageShare('point_lio'),
             'config', 'mid360.yaml'
         ]).perform(context),
-        # LOCAL PATCH P5(见 docs/PATCHES.md):
-        # 下面这个字典排在 params_file 之后,会**覆盖** config/mid360.yaml 的同名参数。
-        # 原先这里还硬编码着 'filter_size_surf': 0.5 与 'filter_size_map': 0.5,
-        # 结果在 yaml 里改这两项**静默失效**(实测踩过)。现已删掉,让 yaml 成为
-        # 唯一真相源(约定 A)。
-        # ⚠️ 以下各项仍然盖住 yaml,要改它们必须改这里:
-        #    use_imu_as_input / prop_at_freq_of_imu / check_satu / init_map_size /
-        #    point_filter_num / space_down_sample / cube_side_length /
-        #    runtime_pos_log_enable
+        # LOCAL PATCH P5:此字典排在 params_file 后,会覆盖 mid360.yaml 同名参数(改这里才生效)。
+        # filter_size_* 不在此处,yaml 是唯一真相源。
         {
             'use_imu_as_input': False,  # Change to True to use IMU as input of Point-LIO
             'prop_at_freq_of_imu': True,
@@ -69,8 +57,7 @@ def _laser_mapping_node(context):
     raw = context.perform_substitution(LaunchConfiguration('pcd_save')).strip().lower()
     if raw:
         if raw not in ('true', 'false', '1', '0', 'yes', 'no', 'on', 'off'):
-            # 启动前就报错,而不是把字符串塞进 bool 参数触发
-            # InvalidParameterTypeException(那种报错看不出是哪来的)
+            # 提前报错:塞进 bool 参数的 InvalidParameterTypeException 看不出来源
             raise RuntimeError(f"pcd_save 只接受 true/false,收到: {raw!r}")
         laser_mapping_params.append(
             {'pcd_save': {'pcd_save_en': raw in ('true', '1', 'yes', 'on')}})
@@ -95,7 +82,7 @@ def generate_launch_description():
         'rviz', default_value='true',
         description='Flag to launch RViz.')
 
-    # LOCAL PATCH P7:建图点云落盘开关(先验地图用,见 docs/LOCALIZATION.md)
+    # LOCAL PATCH P7:建图点云落盘开关(先验地图用)
     pcd_save_arg = DeclareLaunchArgument(
         'pcd_save', default_value='',
         description='是否把建图点云落盘。留空 = 用 config/mid360.yaml 的 pcd_save.pcd_save_en;'

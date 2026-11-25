@@ -1,7 +1,6 @@
 #include <rclcpp/rclcpp.hpp>
 #include <pcl_conversions/pcl_conversions.h>
 #include <sensor_msgs/msg/point_cloud2.hpp>
-// #include <livox_ros_driver2/msg/custom_msg.hpp>
 
 using namespace std;
 
@@ -12,7 +11,7 @@ typedef pcl::PointCloud<PointType> PointCloudXYZI;
 
 enum LID_TYPE {
     AVIA = 1, VELO16, OUST64, HESAIxt32, UNILIDAR
-}; //{1, 2, 3, 4}
+};
 enum TIME_UNIT {
     SEC = 0, MS = 1, US = 2, NS = 3
 };
@@ -119,7 +118,7 @@ namespace ouster_ros {
     };
 }  // namespace ouster_ros
 
-// ─── LOCAL PATCH P1(见 docs/PATCHES.md)─────────────────────────────────
+// ─── LOCAL PATCH P1
 // 上游 dfloreaa/point_lio_ros2 没有 livox 分支:switch(lidar_type) 里只有
 // OUST64 / VELO16 / HESAIxt32 / UNILIDAR,avia_handler 整段被注释。
 // 下面这条注释是本地补的 MID-360 支持。驱动已从 livox_ros_driver2 换成
@@ -146,19 +145,15 @@ POINT_CLOUD_REGISTER_POINT_STRUCT(ouster_ros::Point,
 
 class Preprocess {
 public:
-//   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
     Preprocess();
 
     ~Preprocess();
 
-    // void process(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg, PointCloudXYZI::Ptr &pcl_out);
-
     void process(const sensor_msgs::msg::PointCloud2::SharedPtr &msg, PointCloudXYZI::Ptr &pcl_out);
 
     void set(bool feat_en, int lid_type, double bld, int pfilt_num);
 
-    // sensor_msgs::msg::PointCloud2::ConstSharedPtr pointcloud;
     PointCloudXYZI pl_full, pl_corn, pl_surf;
     PointCloudXYZI pl_buff[128]; //maximum 128 line lidar
     vector<orgtype> typess[128]; //maximum 128 line lidar
@@ -166,13 +161,10 @@ public:
     int lidar_type, point_filter_num, N_SCANS, SCAN_RATE, time_unit;
     double blind;
     bool given_offset_time;
-    //ros::Publisher pub_full, pub_surf, pub_corn;
-
 
 private:
-    // void avia_handler(const livox_ros_driver2::msg::CustomMsg::SharedPtr &msg);
 
-    // LOCAL PATCH P1(见 docs/PATCHES.md):实现见 preprocess.cpp
+    // LOCAL PATCH P1:实现见 preprocess.cpp
     // 新驱动 /livox/lidar 布局:x,y,z,intensity(float32) + timestamp(float64 秒)
     void livox_handler(const sensor_msgs::msg::PointCloud2::SharedPtr &msg);
 

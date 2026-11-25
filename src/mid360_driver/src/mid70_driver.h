@@ -46,12 +46,7 @@ namespace mid70_driver {
         kSpherical = 1      // 球坐标
     };
 
-    /**
-     * Mid-70 的 UDP 会话：广播发现 -> 握手 -> 使能采样 -> 收点云 + 心跳，断流后自动重连。
-     *
-     * 与 Mid-360 不同，Mid-70 的会话是有状态的（没有心跳设备会踢掉连接），
-     * 所以这里自己维护发现/握手/心跳，点云包按 Livox 私有格式解析后转成统一的 Point。
-     */
+    // Mid-70 有状态 UDP 会话（无心跳会被踢掉）：广播发现 -> 握手 -> 使能采样 -> 收点云，断流后自动重连
     class Mid70Driver {
     public:
         struct Options {

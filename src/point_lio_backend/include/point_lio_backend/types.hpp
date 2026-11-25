@@ -27,9 +27,7 @@ struct ScanContextParams {
   int top_candidates = 5;
   int min_index_gap = 20;            // 至少隔 20 个关键帧
   double min_time_gap_sec = 10.0;
-  // 两个关键帧之间的**累计行程**下限。静止/原地转时，同样的 SC 会不断匹配到
-  // 早期关键帧，产生一堆"位移恒等"的假回环（实测静止 45 s 就刷出 2 条）。
-  // 真回环必然走了一段路再回来，所以按路径长度而不是直线距离卡。
+  // 累计行程下限：按路径长度而非直线距离卡，剔除静止时的假回环
   double min_travel_m = 3.0;
 };
 
@@ -78,12 +76,9 @@ struct OutputParams {
   bool publish_odom = true;
   bool publish_raw_path = false;
 
-  // 落盘：把 **回环校正后的 map 系点云** 写成 PCD。
-  // 与 point_lio 的 pcd_save 不是一回事：那份在 vendored 包里写，
-  // 存的是前端 feats_down_world(camera_init 系、没有回环纠正)。
-  // 这份每次都用各关键帧最新的 pose_opt 重建，回环把轨迹拉直的效果会体现在文件里。
+  // 落盘的是回环校正后的 map 系点云（point_lio 的 pcd_save 是未校正的 camera_init 系）
   bool save_pcd = true;
-  std::string pcd_path = "PCD/backend_map.pcd";  // 相对运行 launch 的目录(P8 约定)
+  std::string pcd_path = "PCD/backend_map.pcd";  // 相对 launch 运行目录
   double pcd_save_period = 0.0;                  // s；>0 时定期覆盖写(防 kill -9 丢图)
 };
 
@@ -95,7 +90,7 @@ struct RuntimeParams {
   bool profile = false;              // 打印 worker 各阶段耗时（调参/验收用）
 };
 
-// ── 数据结构 ───────────────────────────────────────────────────────────────
+// ── 数据结构
 // pose_raw = T_odom_body（前端 camera_init 系），pose_opt = T_map_body（后端 map 系）。
 struct Keyframe {
   int id = -1;
@@ -138,7 +133,7 @@ struct BackendParams {
   RuntimeParams runtime;
 };
 
-// ── 小工具 ─────────────────────────────────────────────────────────────────
+// ── 小工具
 inline double deg2rad(double deg) { return deg * M_PI / 180.0; }
 
 inline Eigen::Matrix<double, 6, 6> makeInformation(double trans_sigma, double rot_sigma_rad) {

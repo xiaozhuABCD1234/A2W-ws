@@ -1,4 +1,3 @@
-// #include <../include/IKFoM/IKFoM_toolkit/esekfom/esekfom.hpp>
 #include "Estimator.h"
 
 PointCloudXYZI::Ptr normvec(new PointCloudXYZI(100000, 1));
@@ -38,11 +37,6 @@ Eigen::Matrix<double, 24, 24> process_noise_cov_input()
 	cov.block<3, 3>(12, 12).diagonal() << acc_cov_input, acc_cov_input, acc_cov_input;
 	cov.block<3, 3>(15, 15).diagonal() << b_gyr_cov, b_gyr_cov, b_gyr_cov;
 	cov.block<3, 3>(18, 18).diagonal() << b_acc_cov, b_acc_cov, b_acc_cov;
-	// MTK::get_cov<process_noise_input>::type cov = MTK::get_cov<process_noise_input>::type::Zero();
-	// MTK::setDiagonal<process_noise_input, vect3, 0>(cov, &process_noise_input::ng, gyr_cov_input);// 0.03
-	// MTK::setDiagonal<process_noise_input, vect3, 3>(cov, &process_noise_input::na, acc_cov_input); // *dt 0.01 0.01 * dt * dt 0.05
-	// MTK::setDiagonal<process_noise_input, vect3, 6>(cov, &process_noise_input::nbg, b_gyr_cov); // *dt 0.00001 0.00001 * dt *dt 0.3 //0.001 0.0001 0.01
-	// MTK::setDiagonal<process_noise_input, vect3, 9>(cov, &process_noise_input::nba, b_acc_cov);   //0.001 0.05 0.0001/out 0.01
 	return cov;
 }
 
@@ -55,12 +49,6 @@ Eigen::Matrix<double, 30, 30> process_noise_cov_output()
 	cov.block<3, 3>(18, 18).diagonal() << acc_cov_output, acc_cov_output, acc_cov_output;
 	cov.block<3, 3>(24, 24).diagonal() << b_gyr_cov, b_gyr_cov, b_gyr_cov;
 	cov.block<3, 3>(27, 27).diagonal() << b_acc_cov, b_acc_cov, b_acc_cov;
-	// MTK::get_cov<process_noise_output>::type cov = MTK::get_cov<process_noise_output>::type::Zero();
-	// MTK::setDiagonal<process_noise_output, vect3, 0>(cov, &process_noise_output::vel, vel_cov);// 0.03
-	// MTK::setDiagonal<process_noise_output, vect3, 3>(cov, &process_noise_output::ng, gyr_cov_output); // *dt 0.01 0.01 * dt * dt 0.05
-	// MTK::setDiagonal<process_noise_output, vect3, 6>(cov, &process_noise_output::na, acc_cov_output); // *dt 0.00001 0.00001 * dt *dt 0.3 //0.001 0.0001 0.01
-	// MTK::setDiagonal<process_noise_output, vect3, 9>(cov, &process_noise_output::nbg, b_gyr_cov);   //0.001 0.05 0.0001/out 0.01
-	// MTK::setDiagonal<process_noise_output, vect3, 12>(cov, &process_noise_output::nba, b_acc_cov);   //0.001 0.05 0.0001/out 0.01
 	return cov;
 }
 
@@ -100,23 +88,11 @@ Eigen::Matrix<double, 24, 24> df_dx_input(state_input &s, const input_ikfom &in)
 	in.gyro.boxminus(omega, s.bg);
 	cov.template block<3, 3>(12, 3) = -s.rot.normalized().toRotationMatrix()*MTK::hat(acc_);
 	cov.template block<3, 3>(12, 18) = -s.rot.normalized().toRotationMatrix();
-	// Eigen::Matrix<state_ikfom::scalar, 2, 1> vec = Eigen::Matrix<state_ikfom::scalar, 2, 1>::Zero();
-	// Eigen::Matrix<state_ikfom::scalar, 3, 2> grav_matrix;
-	// s.S2_Mx(grav_matrix, vec, 21);
-	cov.template block<3, 3>(12, 21) = Eigen::Matrix3d::Identity(); // grav_matrix; 
+	cov.template block<3, 3>(12, 21) = Eigen::Matrix3d::Identity(); 
 	cov.template block<3, 3>(3, 15) = -Eigen::Matrix3d::Identity(); 
 	return cov;
 }
 
-// Eigen::Matrix<double, 24, 12> df_dw_input(state_input &s, const input_ikfom &in)
-// {
-// 	Eigen::Matrix<double, 24, 12> cov = Eigen::Matrix<double, 24, 12>::Zero();
-// 	cov.template block<3, 3>(12, 3) = -s.rot.normalized().toRotationMatrix();
-// 	cov.template block<3, 3>(3, 0) = -Eigen::Matrix3d::Identity();
-// 	cov.template block<3, 3>(15, 6) = Eigen::Matrix3d::Identity();
-// 	cov.template block<3, 3>(18, 9) = Eigen::Matrix3d::Identity();
-// 	return cov;
-// }
 
 Eigen::Matrix<double, 30, 30> df_dx_output(state_output &s, const input_ikfom &in)
 {
@@ -124,30 +100,16 @@ Eigen::Matrix<double, 30, 30> df_dx_output(state_output &s, const input_ikfom &i
 	cov.template block<3, 3>(0, 12) = Eigen::Matrix3d::Identity();
 	cov.template block<3, 3>(12, 3) = -s.rot.normalized().toRotationMatrix()*MTK::hat(s.acc);
 	cov.template block<3, 3>(12, 18) = s.rot.normalized().toRotationMatrix();
-	// Eigen::Matrix<state_ikfom::scalar, 2, 1> vec = Eigen::Matrix<state_ikfom::scalar, 2, 1>::Zero();
-	// Eigen::Matrix<state_ikfom::scalar, 3, 2> grav_matrix;
-	// s.S2_Mx(grav_matrix, vec, 21);
-	cov.template block<3, 3>(12, 21) = Eigen::Matrix3d::Identity(); // grav_matrix; 
+	cov.template block<3, 3>(12, 21) = Eigen::Matrix3d::Identity(); 
 	cov.template block<3, 3>(3, 15) = Eigen::Matrix3d::Identity(); 
 	return cov;
 }
 
-// Eigen::Matrix<double, 30, 15> df_dw_output(state_output &s)
-// {
-// 	Eigen::Matrix<double, 30, 15> cov = Eigen::Matrix<double, 30, 15>::Zero();
-// 	cov.template block<3, 3>(12, 0) = Eigen::Matrix3d::Identity();
-// 	cov.template block<3, 3>(15, 3) = Eigen::Matrix3d::Identity();
-// 	cov.template block<3, 3>(18, 6) = Eigen::Matrix3d::Identity();
-// 	cov.template block<3, 3>(24, 9) = Eigen::Matrix3d::Identity();
-// 	cov.template block<3, 3>(27, 12) = Eigen::Matrix3d::Identity();
-// 	return cov;
-// }
 
 vect3 SO3ToEuler(const SO3 &orient) 
 {
 	Eigen::Matrix<double, 3, 1> _ang;
 	Eigen::Vector4d q_data = orient.coeffs().transpose();
-	//scalar w=orient.coeffs[3], x=orient.coeffs[0], y=orient.coeffs[1], z=orient.coeffs[2];
 	double sqw = q_data[3]*q_data[3];
 	double sqx = q_data[0]*q_data[0];
 	double sqy = q_data[1]*q_data[1];
@@ -197,16 +159,16 @@ void h_model_input(state_input &s, esekfom::dyn_share_modified<double> &ekfom_da
 		{
 			auto &points_near = Nearest_Points[idx+j+1];
 			
-			ikdtree.Nearest_Search(point_world_j, NUM_MATCH_POINTS, points_near, pointSearchSqDis, 2.236); //1.0); //, 3.0); // 2.236;
+			ikdtree.Nearest_Search(point_world_j, NUM_MATCH_POINTS, points_near, pointSearchSqDis, 2.236); // 2.236
 			
-			if ((points_near.size() < NUM_MATCH_POINTS) || pointSearchSqDis[NUM_MATCH_POINTS - 1] > 5) // 5)
+			if ((points_near.size() < NUM_MATCH_POINTS) || pointSearchSqDis[NUM_MATCH_POINTS - 1] > 5)
 			{
 				point_selected_surf[idx+j+1] = false;
 			}
 			else
 			{
 				point_selected_surf[idx+j+1] = false;
-				if (esti_plane(pabcd, points_near, plane_thr)) //(planeValid)
+				if (esti_plane(pabcd, points_near, plane_thr))
 				{
 					float pd2 = pabcd(0) * point_world_j.x + pabcd(1) * point_world_j.y + pabcd(2) * point_world_j.z + pabcd(3);
 					
@@ -292,7 +254,7 @@ void h_model_output(state_output &s, esekfom::dyn_share_modified<double> &ekfom_
 			else
 			{
 				point_selected_surf[idx+j+1] = false;
-				if (esti_plane(pabcd, points_near, plane_thr)) //(planeValid)
+				if (esti_plane(pabcd, points_near, plane_thr))
 				{
 					float pd2 = pabcd(0) * point_world_j.x + pabcd(1) * point_world_j.y + pabcd(2) * point_world_j.z + pabcd(3);
 					
@@ -342,7 +304,6 @@ void h_model_output(state_output &s, esekfom::dyn_share_modified<double> &ekfom_
 				M3D point_crossmat = crossmat_list[idx+j+1];
 				V3D C(s.rot.conjugate().normalized() * norm_vec);
 				V3D A(point_crossmat * C);
-				// V3D A(point_crossmat * state.rot_end.transpose() * norm_vec);
 				ekfom_data.h_x.block<1, 12>(m, 0) << norm_vec(0), norm_vec(1), norm_vec(2), VEC_FROM_ARRAY(A), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0;
 			}
 			ekfom_data.z(m) = -norm_vec(0) * feats_down_world->points[idx+j+1].x -norm_vec(1) * feats_down_world->points[idx+j+1].y -norm_vec(2) * feats_down_world->points[idx+j+1].z-normvec->points[j].intensity;

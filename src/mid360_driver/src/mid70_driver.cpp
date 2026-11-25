@@ -15,17 +15,11 @@
 
 namespace mid70_driver {
 
-    /**
-     * Mid-70 使用 Livox 私有 UDP 协议，两种包格式：
-     *
-     * 1. 0xAA 帧（发现广播 / 命令应答 / 心跳应答），帧头 9 字节 + 帧尾 CRC32，小端：
-     *    sof(1)=0xAA | version(1)=1 | length(2, 整包长度) | packet_type(1) | seq_num(2) | preamble_crc(2)
-     *    cmd_set(1) | cmd_id(1) | data[...] | crc32(4)
-     *    preamble_crc = CRC16/MCRF4XX(seed 0x4C49) 校验前 7 字节，crc32 = CRC32(seed 0x564F580A) 覆盖 [0, length-4)
-     *    packet_type: 0=CMD(主机请求) 1=ACK(应答) 2=MSG(设备主动上报)
-     *
-     * 2. 点云包（裸包，无 0xAA 帧头）：LivoxEthPacket = 18 字节头 + N 个点
-     */
+    // Livox 私有 UDP 协议。0xAA 帧（小端，帧头 9 字节 + 帧尾 CRC32）：
+    //   sof(1)=0xAA | version(1)=1 | length(2, 整包长度) | packet_type(1) | seq_num(2) | preamble_crc(2)
+    //   | cmd_set(1) | cmd_id(1) | data[...] | crc32(4)
+    //   preamble_crc = CRC16/MCRF4XX(seed 0x4C49) 校验前 7 字节；crc32 = CRC32(seed 0x564F580A) 覆盖 [0, length-4)
+    // 点云包无 0xAA 帧头：LivoxEthPacket = 18 字节头 + N 个点
     static constexpr uint8_t kSof = 0xAA;
     static constexpr uint8_t kSdkVersion = 0x01;
     static constexpr std::size_t kFramePrefixLength = 9;
@@ -357,8 +351,7 @@ namespace mid70_driver {
         sleep_timer.cancel();
         asio::error_code error_code;
         discovery_socket.close(error_code);
-        // 收点云先停，run() 会走到 close_session() 主动断开；cmd socket 只打断可能在等的应答，
-        // 保持可用才能把断开报文发出去（设备因此立刻回到广播态，不用等心跳超时）
+        // cmd socket 只 cancel 不 close：断开报文要靠它发出，设备才立刻回到广播态
         data_socket.close(error_code);
         cmd_socket.cancel(error_code);
     }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pre-commit:校验分支名、禁止产物路径、文件大小与冲突标记
+# pre-commit:分支名/产物路径/文件大小/冲突标记
 set -euo pipefail
 
 . "$(dirname "$0")/lib.sh"

@@ -6,8 +6,7 @@
 
 namespace point_lio_backend {
 
-// 关键帧采样与子图拼接。addFrame() 缓存最近的机体系点云；
-// shouldCreate() 判断是否该出新关键帧；buildNextKeyframe() 生成子图。
+// 关键帧采样与子图拼接
 class KeyframeManager {
  public:
   explicit KeyframeManager(const KeyframeParams& params);

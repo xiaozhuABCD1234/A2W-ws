@@ -1,21 +1,12 @@
-"""离线看 PCD:把点云文件当话题发出来 + rviz 显示。不需要雷达/point_lio 在跑。
+"""离线看 PCD:把点云文件当话题发出来 + rviz 显示,不需要雷达/point_lio 在跑。
 
-    ros2 launch mid360_bringup pcd_view.launch.py
-    ros2 launch mid360_bringup pcd_view.launch.py pcd:=$HOME/maps/prior.pcd
-    ros2 launch mid360_bringup pcd_view.launch.py show_rviz:=false   # 只发话题
-    ros2 launch mid360_bringup pcd_view.launch.py static_tf:=false   # 已有 TF 时不发假的
+    ros2 launch mid360_bringup pcd_view.launch.py [pcd:=...] [show_rviz:=false] [static_tf:=false]
 
-话题 /cloud_pcd 是 pcl_ros 的 pcd_to_pointcloud 写死的(它没有 topic 参数),
-frame_id 由 tf_frame 参数决定。
+话题 /cloud_pcd 是 pcd_to_pointcloud 写死的(无 topic 参数),frame_id 由 tf_frame 决定。
 
-关于那条 Fixed Frame 报错:
-    rviz 的 Fixed Frame 只认 TF 树上的帧,而单独看 PCD 时 TF 树是空的,
-    于是状态栏会报 "Fixed Frame [camera_init] does not exist"。
-    点云本身其实照画不误 —— 点云 frame 与 Fixed Frame 同名时 tf2 直接返回单位变换
-    (geometry2 tf2/src/buffer_core.cpp 的 lookupTransformImpl 里有
-    "Identity case does not need to be validated" 短路),压根不去查 TF。
-    但报红难看,所以默认再发一条 map -> <frame> 的单位静态 TF 把帧塞进树里。
-    已经在跑 point_lio(camera_init 是它发的)时用 static_tf:=false 关掉。
+单独看 PCD 时 TF 树为空,rviz 会报 "Fixed Frame does not exist" —— 点云照画
+(点云 frame 与 Fixed Frame 同名时 tf2 直接返回单位变换),只是报红难看;
+默认发一条 map -> <frame> 的单位静态 TF 塞进树里。已在跑 point_lio 时传 static_tf:=false。
 """
 
 from launch import LaunchDescription
@@ -28,8 +19,7 @@ from launch.substitutions import (
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
-# point_lio 已改成相对路径落盘(P8):就是运行 launch 目录下的 PCD/scans.pcd。
-# 在同目录启动就能直接看到:cd ~/Projects/A2W-ws && ros2 launch mid360_bringup pcd_view.launch.py
+# point_lio 相对路径落盘(P8):运行 launch 目录下的 PCD/scans.pcd,同目录启动即可看到。
 DEFAULT_PCD = './PCD/scans.pcd'
 
 
@@ -72,8 +62,7 @@ def generate_launch_description():
         }],
     )
 
-    # 父帧叫 map:rviz 里最不容易引起歧义的名字,而且不会和 point_lio 抢 camera_init
-    # (tf2 里一个帧只能有一个父帧,这里只是给 camera_init 挂个上家,不动它发的东西)。
+    # 父帧叫 map:不与 point_lio 抢 camera_init(tf2 一个帧只能有一个父帧,只是挂个上家)。
     static_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',

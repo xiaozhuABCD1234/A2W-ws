@@ -100,13 +100,12 @@ class BackendNode : public rclcpp::Node {
     if (worker_.joinable()) {
       worker_.join();
     }
-    // worker 已退出，keyframes_ / map_accum_ 不再有并发写：退出时落一份地图。
-    // 必须在这里而不是信号回调里做——回调里拿不到 worker 的独占权。
+    // worker 已 join 后落盘：信号回调里拿不到 worker 的独占权
     saveMapPcd("shutdown");
   }
 
  private:
-  // ── 参数 ────────────────────────────────────────────────────────────────
+  // ── 参数
   template <typename T>
   T declareParam(const std::string& name, const T& default_value) {
     return this->declare_parameter<T>(name, default_value);
@@ -265,7 +264,7 @@ class BackendNode : public rclcpp::Node {
         [this]() { statusTimerCallback(); }, timer_group_);
   }
 
-  // ── 订阅回调：stamp 配对，重活全部丢给 worker ───────────────────────────
+  // ── 订阅回调：stamp 配对，重活全部丢给 worker
   void odomCallback(const nav_msgs::msg::Odometry::ConstSharedPtr& msg) {
     try {
       const double stamp = rclcpp::Time(msg->header.stamp).seconds();
@@ -410,7 +409,7 @@ class BackendNode : public rclcpp::Node {
     queue_cv_.notify_all();
   }
 
-  // ── worker ──────────────────────────────────────────────────────────────
+  // ── worker
   size_t queueSize() {
     std::lock_guard<std::mutex> lock(queue_mutex_);
     return queue_.size();
@@ -552,8 +551,7 @@ class BackendNode : public rclcpp::Node {
         runOptimization();
       }
 
-      // 定期落盘（可选）：默认 0 = 只在退出时写。设为 >0 后每 N 秒覆盖写一次，
-      // 这样 kill -9 / 断电也能留下最近一份（PCD 只有在正常退出时才写的坑见 P8）。
+      // pcd_save_period > 0 时定期覆盖写，防 kill -9 / 断电丢图（默认只在退出时写）
       if (params_.output.save_pcd && params_.output.pcd_save_period > 0.0) {
         const auto t_pcd = std::chrono::steady_clock::now();
         if (std::chrono::duration<double>(t_pcd - last_pcd_save_).count() >=
@@ -601,9 +599,7 @@ class BackendNode : public rclcpp::Node {
                   keyframes_.size(), loops_.size(), last_solve_ms_);
       publishPath();
       publishLoopMarkers();
-      // 回环常成串到达（连续几个关键帧各触发一次优化），且每条新回环对历史位姿的
-      // 修正量通常越来越小。整图重建是 O(全部关键帧)（实测 100~1400 ms，会阻塞 worker），
-      // 所以只有纠偏量真的变了才置脏，再由 map_publish_period 节流重建。
+      // 整图重建实测 100~1400 ms 且阻塞 worker：只有纠偏量变了才置脏，由 map_publish_period 节流
       {
         std::lock_guard<std::mutex> lock(state_mutex_);
         const Eigen::Isometry3d delta = correction_ * last_rebuild_correction_.inverse();
@@ -620,7 +616,7 @@ class BackendNode : public rclcpp::Node {
     }
   }
 
-  // ── 发布 ────────────────────────────────────────────────────────────────
+  // ── 发布
   struct TimedPose {
     double stamp = 0.0;
     int64_t stamp_ns = 0;
@@ -742,13 +738,9 @@ class BackendNode : public rclcpp::Node {
     return filtered;
   }
 
-  // ── 地图落盘 ────────────────────────────────────────────────────────────
-  // 存的是"回环校正后的 map 系点云"，和 point_lio 的 pcd_save 有两点不同：
-  //   1. 坐标：map(后端) vs camera_init(前端)，前端那份没有回环纠正；
-  //   2. 位姿：这里用每条关键帧**当前**的 pose_opt 全量重建，所以位姿图把历史
-  //      轨迹拉直之后，早先关键帧的点也会跟着动。
-  // 想验证"回环到底改了多少"，把这两份 PCD 叠起来看墙厚就够。
-  // 调用时机：worker 持有独占权（processPair 内）或 worker 已 join（析构）。
+  // ── 地图落盘
+  // 存回环校正后的 map 系点云（point_lio 的 pcd_save 是未校正的 camera_init 系）。
+  // 只能在 worker 持有独占权或已 join 时调用。
   void saveMapPcd(const char* reason) {
     if (!params_.output.save_pcd) {
       return;
@@ -787,11 +779,9 @@ class BackendNode : public rclcpp::Node {
                 reason, path_str.c_str(), full->size(), keyframes_.size(), ms);
   }
 
-  // 地图点云是增量维护的：每来一个关键帧只把"新增的那几帧"变换+体素化后并进
-  // map_accum_，而不是每次重建全图。全量重建只在回环优化改变了历史位姿之后做。
-  // 否则长时建图会退化成 O(关键帧数) 的重复变换（2000 帧 × 5k 点/2 s 就能吃满一个核）。
+  // 增量维护：只并入新增关键帧；全量重建仅在历史位姿被优化改过后做（否则吃满一个核）。
+  // 只在 worker 线程调用。
   void publishMapPoints(bool rebuild_all = false) {
-    // 只在 worker 线程调用；keyframes_ 的写者也是 worker，读安全。
     if (rebuild_all || !map_accum_ ||
         map_keyframes_applied_ > keyframes_.size()) {
       map_accum_.reset(new PointCloudT());
@@ -917,11 +907,7 @@ class BackendNode : public rclcpp::Node {
         has_odom = has_odom_;
       }
       if (!has_odom) {
-        // 关键：还没收到前端位姿时也要发 TF，而且是**单位阵**。
-        // map 系的定义就是"锚定在第一个关键帧的 camera_init"，所以此刻
-        // map == camera_init 恒成立。不发的话，rviz / octomap_server 会一直报
-        //   Could not transform from [camera_init] to [map]
-        // —— point_lio 的 IMU 初始化要几秒，用户看到的第一个红字就是这个。
+        // 未收到前端位姿时发单位 TF（map 锚定在 camera_init），否则 rviz/octomap 一直报 Could not transform
         geometry_msgs::msg::TransformStamped identity;
         identity.header.stamp = now();
         identity.header.frame_id = params_.world_frame;
@@ -943,14 +929,8 @@ class BackendNode : public rclcpp::Node {
       }
 
       geometry_msgs::msg::TransformStamped tf_msg = tf2::eigenToTransform(correction);
-      // TF 用**墙钟**打戳，不用传感器时戳。原因（实测）：
-      // point_lio 先发 /cloud_registered(T) 再发 odom(T)，而 map->camera_init 的
-      // 内容只来自 odom，所以按 odom 打戳时，任何 frame=camera_init 的显示在收到
-      // 点云的那一刻，TF 缓冲里最新只到 T-100ms →
-      //   "Lookup would require extrapolation into the future"
-      // rviz 的 message filter 要等下一帧 TF 才能补上，状态栏就一直挂着红字。
-      // 用 now() 打戳后，点云时刻 T 落在 [now-50ms, now] 的插值窗口内，一次就能查到。
-      // map->camera_init 是缓变纠偏量，用墙钟打戳也是常规做法（雷达与主机时钟已同步）。
+      // TF 用墙钟打戳：point_lio 先发点云后发 odom，按 odom 打戳会报 extrapolation into the future；
+      // map->camera_init 是缓变量，墙钟打戳无损精度。
       tf_msg.header.stamp = now();
       tf_msg.header.frame_id = params_.world_frame;
       tf_msg.child_frame_id = params_.odom_frame;
@@ -1010,7 +990,7 @@ class BackendNode : public rclcpp::Node {
     }
   }
 
-  // ── 纠偏平滑 ────────────────────────────────────────────────────────────
+  // ── 纠偏平滑
   // 调用时须持有 state_mutex_。
   void updateTargetCorrectionLocked() {
     if (keyframes_.empty()) {
@@ -1046,7 +1026,7 @@ class BackendNode : public rclcpp::Node {
         (1.0 - alpha) * correction_.translation() + alpha * target_correction_.translation();
   }
 
-  // ── 成员 ────────────────────────────────────────────────────────────────
+  // ── 成员
   static constexpr size_t kMaxOdomBuffer = 200;
   static constexpr size_t kMapCompressThreshold = 1'500'000;  // 增量合并后超过就整体压一次
 

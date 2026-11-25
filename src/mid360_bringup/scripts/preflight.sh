@@ -1,26 +1,12 @@
 #!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────────────────────
-# mid360_bringup preflight —— 启动前的配置自洽性检查
+# mid360_bringup preflight —— 启动前配置自洽性检查。
+# 这条链路最危险的是静默错配(mid360_driver 直接发 PointCloud2,timestamp 为
+# float64 绝对 Unix 秒;lidar_type/timestamp_unit/话题名/host_ip/octomap 输入
+# 任一错配都不报错,只表现为 rviz 无点云或时间轴错位),故启动前拦住。
 #
-# 为什么需要它:这条链路上最危险的不是崩溃,而是**静默的错配**。
-#   mid360_driver 直接发 PointCloud2(x/y/z/intensity float32 + timestamp
-#   float64 绝对 Unix 秒);point_lio 的 preprocess.lidar_type 决定用哪个
-#   handler 去解,timestamp_unit 决定把帧内时差缩放到 ms 的系数。
-#   错配时 point_lio 不报错、IMU 初始化能到 100%,但点云时间轴错位或永远
-#   收不到点云 —— 现场表现为"rviz 里什么都没有/旋转重影",排查成本极高。
-#   同类问题:octomap 必须喂机体系点云、驱动 host_ip 必须等于本机网卡地址。
-#   这些都交给本脚本在启动前拦住。
-#
-# 用法:
-#   preflight.sh                      # 静态检查:只读配置/源码,不需要 ROS 在跑
-#   preflight.sh --runtime            # 运行时检查:核对实际 topic 类型
-#   preflight.sh --runtime --timeout 20 --topic /livox/lidar
-#   preflight.sh --quiet              # 只输出 FAIL/WARN(给 launch 用)
-#
-# 退出码:0 通过(WARN 不影响)/ 1 有 FAIL / 2 环境不完整(找不到被检查的文件)
-#
-# 环境变量:MID360_WS  工作空间根目录(默认从脚本位置向上搜索)
-# ─────────────────────────────────────────────────────────────────────────────
+# 用法:preflight.sh [--runtime] [--quiet] [--timeout N] [--topic T]
+# 退出码:0 通过(WARN 不影响)/ 1 有 FAIL / 2 环境不完整
+# 环境变量 MID360_WS:工作空间根目录(默认从脚本位置向上搜索)
 set -uo pipefail
 
 FAIL=0
@@ -36,7 +22,7 @@ while [ $# -gt 0 ]; do
     --quiet)   QUIET=1 ;;
     --timeout) TIMEOUT="${2:-10}"; shift ;;
     --topic)   LID_TOPIC="${2:-/livox/lidar}"; shift ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,9p' "$0"; exit 0 ;;
     *) echo "未知参数:$1(用 --help)" >&2; exit 2 ;;
   esac
   shift
@@ -53,7 +39,7 @@ fail() { printf '  %sFAIL%s  %s\n' "$C_R" "$C_0" "$1"; FAIL=$((FAIL + 1)); }
 info() { printf '        %s%s%s\n' "$C_D" "$1" "$C_0"; }
 head2() { [ "$QUIET" = 1 ] || printf '\n%s\n' "$1"; }
 
-# ── 定位工作空间 ────────────────────────────────────────────────────────────
+# ── 定位工作空间 ────────────────────────────────────
 WS="${MID360_WS:-}"
 if [ -z "$WS" ]; then
   d="$(cd "$(dirname "$0")" && pwd)"
@@ -63,7 +49,7 @@ if [ -z "$WS" ]; then
   done
 fi
 
-# 先 src/ 后 install/ 拷贝:正常情况下两者一致,不一致本身会被本脚本报出来
+# 先 src/ 后 install/:两者正常一致,不一致会被 C5 报出来
 pick() { for f in "$@"; do [ -f "$f" ] && { printf '%s\n' "$f"; return 0; }; done; return 1; }
 
 PIO_CFG=""; PIO_LAUNCH=""; DRV_CFG=""; DRV_LAUNCH=""; OCM_CFG=""; OCM_LAUNCH=""; PREPROC=""
@@ -139,10 +125,10 @@ else
   fail "preprocess.cpp 缺少 livox_handler 或 PointCloud2ConstIterator(P1 不在位)"
   info "mid360_driver 的点云布局为 x/y/z/intensity(float32) + timestamp(float64,秒);"
   info "P1 必须用 PointCloud2ConstIterator 解析,不能再用 livox_ros::Point/fromROSMsg。"
-  info "多半是同步上游时补丁被覆盖。见 docs/PATCHES.md 的 P1,恢复后再 build。"
+  info "多半是同步上游时补丁被覆盖,恢复 P1 后再 build。"
 fi
 
-# ── C2 点时间单位 / IMU 量纲 ───────────────────────────────────────────────
+# ── C2 点时间单位 / IMU 量纲
 head2 'C2  点时间单位 timestamp_unit / IMU 量纲 acc_norm'
 if [ "$LIDAR_TYPE" = "1" ]; then
   if [ "$TS_UNIT" = "0" ]; then
@@ -221,7 +207,7 @@ if [ -n "$dup" ]; then
   warn "octomap launch 里又出现数字默认值(会盖掉 yaml):"
   printf '        %s\n' "$dup"
   info "resolution/max_range 的唯一真相应是 config/octomap_mid360.yaml;"
-  info "launch 侧应保持 default_value=''(留空=用 yaml),见 docs/PATCHES.md 的 A 项说明。"
+  info "launch 侧应保持 default_value=''(留空=用 yaml)。"
 else
   pass "octomap 参数单一真相源(yaml),launch 不再覆盖"
 fi
@@ -286,11 +272,9 @@ if [ -n "$PIO_LAUNCH" ]; then
     warn "没能从 $PIO_CFG 抽出顶层键,双真相源检查未生效(脚本需修)"
   else
     both="$(comm -12 <(printf '%s\n' "$launch_keys") <(printf '%s\n' "$yaml_keys") | tr '\n' ' ')"
-    # 约定 A 允许的「条件覆盖」:launch 里声明了 default_value='' 的同名 launch 参数
-    # (P7 的 pcd_save 就是这种:只有显式传参才追加参数项,不传时求值为空串、不追加,
-    #  yaml 仍是真相源)。这类不该报 WARN —— 否则真告警会被常年淹没。
-    # 注意这是启发式:认的是「声明了空默认值」这个标记,所以覆盖必须真的写成
-    # OpaqueFunction + if 判断;不要又把名字无条件塞回参数字典(那就回到 P5 的坑)。
+    # 约定 A 允许「条件覆盖」:声明了 default_value='' 的同名参数(如 P7 的
+    # pcd_save)只有显式传参才生效,yaml 仍是真相源,不报 WARN。这是启发式,
+    # 覆盖必须真的写成 OpaqueFunction + if 判断,不要无条件塞回参数字典(P5 的坑)。
     cond_keys="$(grep -E "^[[:space:]]*'[a-z_][a-z0-9_]*',[[:space:]]*default_value=''" "$PIO_LAUNCH" \
                  | grep -oE "'[a-z_][a-z0-9_]*'" | tr -d "'" | sort -u)"
     both_list="$(printf '%s\n' "$both" | tr ' ' '\n' | grep . | sort -u)"
@@ -299,7 +283,7 @@ if [ -n "$PIO_LAUNCH" ]; then
     n=$(printf '%s\n' "$launch_keys" | grep -c . || true)
     if [ -n "$hard_both" ]; then
       warn "这些参数同时写在 launch 和 yaml 里,launch 会赢(改 yaml 无效): $hard_both"
-      info "改值请改 launch(file: $PIO_LAUNCH);或按 docs/PATCHES.md 约定 A 从 launch 里删掉。"
+      info "改值请改 launch(file: $PIO_LAUNCH)。"
     elif [ -n "$cond_both" ]; then
       pass "launch 硬编码 $n 项均不同名于 yaml;另有条件覆盖(约定 A,不传参时 yaml 生效): $cond_both"
     else
@@ -329,7 +313,7 @@ else
       pass "backend $k=$got"
     else
       fail "backend $k='${got:-空}',应为 $want"
-      info "坐标系契约见 docs/BACKEND_SPEC.md 第 1 节;错配会让 octomap/rviz 查不到 TF。"
+      info "坐标系契约错配会让 octomap/rviz 查不到 TF。"
     fi
   done
 fi
@@ -345,8 +329,8 @@ fi
 if [ -n "$WS" ]; then
   if [ -d "$WS/install/point_lio_backend" ]; then
     pass "point_lio_backend 已 build(install/ 存在)"
-    # 磁盘上有 ≠ 当前终端环境里能发现:环境是在新增该包之前 source 的话,
-    # AMENT_PREFIX_PATH 里没有它,launch 会报 "package not found"(实测踩过一次)。
+    # 磁盘上有 ≠ 终端环境能发现:若环境是在新增该包前 source 的,
+    # AMENT_PREFIX_PATH 里没有它,launch 会报 "package not found"。
     found_in_env=0
     IFS_save="$IFS"; IFS=':'
     for p in ${AMENT_PREFIX_PATH:-}; do

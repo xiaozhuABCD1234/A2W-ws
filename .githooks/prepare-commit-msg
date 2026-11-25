@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# prepare-commit-msg:在交互式提交模板中注入规约说明,不影响 git commit -m / merge / squash
+# prepare-commit-msg:交互式提交时注入规约说明到模板
 set -euo pipefail
 
 . "$(dirname "$0")/lib.sh"

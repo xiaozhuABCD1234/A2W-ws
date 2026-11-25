@@ -49,8 +49,7 @@ Eigen::VectorXd effectiveRingKey(const ScanContext& scan_context, const Keyframe
   return Eigen::VectorXd();
 }
 
-// 回环匹配专用降采样：GICP 的耗时≈点数×候选数×迭代数，全分辨率子图太贵。
-// 只影响匹配，不影响 keyframe.cloud（地图与输出仍是原分辨率）。
+// 回环匹配专用降采样（GICP 耗时≈点数×候选数×迭代数），不影响 keyframe.cloud
 PointCloudT::Ptr downsampleForMatching(const PointCloudT::ConstPtr& cloud,
                                        const IcpParams& params) {
   if (!cloud || cloud->empty()) {
@@ -184,9 +183,8 @@ std::optional<LoopConstraint> LoopDetector::detect(
               });
   }
 
-  // ── 第二阶段：SC 精筛 ────────────────────────────────────────────────
-  // 先算完所有候选的 SC 距离再排序：GICP 很贵，必须让最像的候选先试，
-  // 配合 stop_at_first 大多数关键帧只跑 0~1 次 GICP。
+  // ── 第二阶段：SC 精筛
+  // 先算完 SC 距离再排序，让最像的候选先跑 GICP
   struct Verified {
     size_t history_index = 0;
     double sc_distance = std::numeric_limits<double>::max();
@@ -225,8 +223,7 @@ std::optional<LoopConstraint> LoopDetector::detect(
   const double budget_ms = icp_params_.time_budget_ms;
 
   for (const Verified& candidate : verified) {
-    // 预算控制：坏候选可能让 GICP 迭代满也不收敛，必须在循环里判超时，
-    // 否则一次检测就能把 worker 卡住 1 s 以上。
+    // 循环内判超时：坏候选会让 GICP 迭代满仍不收敛
     if (budget_ms > 0.0) {
       const double elapsed_ms = std::chrono::duration<double, std::milli>(
           std::chrono::steady_clock::now() - detect_start).count();
@@ -340,8 +337,7 @@ std::optional<LoopConstraint> LoopDetector::detect(
       constraint.inlier_ratio = inlier_ratio;
       constraint.active = true;
       best = constraint;
-      // 候选已按 SC 距离升序：第一个通过全部校验的通常就是正确回环。
-      // 后面再跑 GICP 只会增加延迟（实测 8 候选全跑要 0.7~3.3 s/关键帧）。
+      // 候选按 SC 距离升序，首个通过校验的通常即正确回环
       if (icp_params_.stop_at_first) {
         return best;
       }

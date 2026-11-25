@@ -28,8 +28,7 @@ import time
 try:
     import numpy as np
 except ModuleNotFoundError:
-    # 本机 which python3 可能是 uv/venv 的 3.14（没有 numpy/rclpy）；
-    # 自动切到系统 python3，保持 ROS 环境变量不变。
+    # uv/venv 的 python3 没有 numpy/rclpy 时切到系统 python3
     if os.path.realpath(sys.executable) != '/usr/bin/python3':
         os.execv('/usr/bin/python3', ['/usr/bin/python3'] + sys.argv)
     raise
@@ -41,7 +40,7 @@ from sensor_msgs.msg import PointCloud2, PointField
 from nav_msgs.msg import Odometry, Path
 from diagnostic_msgs.msg import DiagnosticArray
 
-# ── PCD 读取 ───────────────────────────────────────────────────────────────
+# ── PCD 读取
 
 def load_pcd_xyz(path):
     header = {}
@@ -78,7 +77,7 @@ def load_pcd_xyz(path):
     return xyz[:n]
 
 
-# ── 轨迹生成 ───────────────────────────────────────────────────────────────
+# ── 轨迹生成
 
 def rot_z(yaw):
     c, s = math.cos(yaw), math.sin(yaw)
@@ -147,7 +146,7 @@ def distort_odometry(gt_poses, scale=1.05, yaw_bias_deg_per_m=0.5):
     return raw
 
 
-# ── ROS 发布/订阅 ──────────────────────────────────────────────────────────
+# ── ROS 发布/订阅
 
 def xyz_to_pointcloud2(points, frame_id, stamp):
     msg = PointCloud2()
@@ -280,7 +279,7 @@ def pose_from_msg(p):
     return T
 
 
-# ── 主流程 ─────────────────────────────────────────────────────────────────
+# ── 主流程
 
 def find_ws(start):
     d = os.path.abspath(start)
@@ -294,8 +293,7 @@ def find_ws(start):
 def start_backend(ws, params, log_path, pcd_out):
     env = os.environ.copy()
     env.setdefault('ROS_DOMAIN_ID', '77')
-    # 覆盖落盘路径：后端默认会写 ./PCD/backend_map.pcd，而测试的 cwd 就是工作区，
-    # 不覆盖的话一次 replay 就会把真机跑出来的正式地图冲掉。
+    # 不覆盖的话 replay 会冲掉工作区里真机跑出的正式地图
     cmd = ['ros2', 'run', 'point_lio_backend', 'point_lio_backend_node',
            '--ros-args', '--params-file', params,
            '-p', 'output.pcd_path:=' + pcd_out]
@@ -350,12 +348,12 @@ def main():
         raise SystemExit('找不到测试参数: ' + params)
 
     os.environ.setdefault('ROS_DOMAIN_ID', '77')
-    # 沙箱/容器里 ~/.ros 可能不可写：把 ROS 日志与 home 指到 /tmp。
+    # 沙箱里 ~/.ros 可能不可写
     ros_home = os.path.join(tempfile.gettempdir(), 'point_lio_backend_ros_home')
     os.makedirs(os.path.join(ros_home, 'log'), exist_ok=True)
     os.environ.setdefault('ROS_HOME', ros_home)
     os.environ.setdefault('ROS_LOG_DIR', os.path.join(ros_home, 'log'))
-    # 沙箱里 FastDDS 共享内存段可能建不了，强制走 UDP，避免一堆 SHM 报错。
+    # 沙箱里 FastDDS 共享内存段可能建不了,强制走 UDP
     os.environ.setdefault('FASTDDS_BUILTIN_TRANSPORTS', 'UDPv4')
     print(f'[replay] ws={ws} pcd={pcd} mode={args.mode} domain={os.environ["ROS_DOMAIN_ID"]}')
 

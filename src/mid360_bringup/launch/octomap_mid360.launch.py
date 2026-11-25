@@ -1,32 +1,20 @@
-"""Point-LIO 点云 -> octomap 三维占据栅格。
+"""Point-LIO 点云 -> octomap 三维占据栅格。只负责 octomap_server + rviz 层。
 
-前置(另开终端,先跑起来):
+前置(另开终端):
     ros2 launch mid360_driver mid360_driver.launch.py
-    ros2 launch point_lio mapping_mid360.launch.py rviz:=false   # 关掉 point_lio 自己的 rviz
+    ros2 launch point_lio mapping_mid360.launch.py rviz:=false
 
-本 launch 只负责 octomap_server + rviz 这一层,方便单独重启/调参。
+    ros2 launch mid360_bringup octomap_mid360.launch.py [rviz:=true] [resolution:=0.2 max_range:=15.0]
 
-    ros2 launch mid360_bringup octomap_mid360.launch.py
-    ros2 launch mid360_bringup octomap_mid360.launch.py rviz:=true   # 单窗口:octomap + LIO 点云 + path
-    ros2 launch mid360_bringup octomap_mid360.launch.py resolution:=0.2 max_range:=15.0  # 临时覆盖
+参数来源:config/octomap_mid360.yaml 是 resolution/max_range 的唯一真相源,
+只有命令行显式传参才覆盖(旧的 default_value='0.1' 写法等于无条件顶掉 yaml,
+改 yaml 不生效)。
 
-参数来源(唯一真相源):
-    config/octomap_mid360.yaml 是 resolution / max_range 的唯一真相源。
-    只有命令行**显式**传参才覆盖 yaml;不传就用 yaml 里的值。
-    (旧写法在 DeclareLaunchArgument 上给了 default_value='0.1'/'20.0',
-     等于无条件把 yaml 顶掉 —— 改 yaml 不生效。详见 docs/PATCHES.md 的 A 项。)
+日常一键启动:ros2 launch mid360_bringup mid360.launch.py
 
-日常一键启动(驱动 + point_lio + octomap + rviz):
-    ros2 launch mid360_bringup mid360.launch.py
-
-输出:
-    /octomap_full, /octomap_binary   octomap_msgs/Octomap(3D 栅格)
-    /octomap_point_cloud_centers     占据体素中心点云
-    /occupied_cells_vis_array        MarkerArray(粒度随 octree 深度)
-    /projected_map                   nav_msgs/OccupancyGrid(2D 投影,给 nav2/costmap)
-服务:
-    /octomap_server/octomap_full, /octomap_binary  (用 octomap_saver 存盘)
-    /octomap_server/clear_bbox
+输出:/octomap_full, /octomap_binary(Octomap)/ /octomap_point_cloud_centers
+/ /occupied_cells_vis_array(MarkerArray)/ /projected_map(2D 投影,给 nav2)
+服务:/octomap_server/octomap_full, /octomap_binary, /octomap_server/clear_bbox
 """
 
 from launch import LaunchDescription
@@ -47,13 +35,9 @@ OVERRIDABLE = {
 def _octomap_node(context):
     """按「yaml 优先,显式传参才覆盖」组装 octomap_server。
 
-    为什么不直接在 DeclareLaunchArgument 上给 default_value:
-    节点 parameters 列表里排在后面的项覆盖前面的,而 LaunchConfiguration
-    总是会被求值 —— default_value='0.1' 就等于**无条件**追加一个覆盖项,
-    把 yaml 里的值顶掉。于是「改了 config/*.yaml 却不生效」,而且
-    src/ 与 install/ 两份副本容易对不上,排查起来像玄学。
-    现在 default_value=''(= 没传,LaunchConfiguration 求值为空串),
-    只有显式传参才追加覆盖项,配置源头收敛到一处。
+    不能在 DeclareLaunchArgument 上给数字 default_value:parameters 列表后面的项
+    覆盖前面的,LaunchConfiguration 又总是被求值,等于无条件顶掉 yaml ——
+    改 config/*.yaml 不生效。default_value='' 时只有显式传参才追加覆盖项。
     """
     params = [PathJoinSubstitution([
         FindPackageShare('mid360_bringup'), 'config', 'octomap_mid360.yaml'
@@ -68,9 +52,9 @@ def _octomap_node(context):
         raw = context.perform_substitution(LaunchConfiguration(arg_name)).strip()
         if not raw:
             continue
-        value = cast(raw)          # 显式传参时自己转换类型,避免
-        top, _, leaf = param_name.partition('.')   # declare_parameter 抛
-        if leaf:                    # InvalidParameterTypeException
+        value = cast(raw)          # 自己转换类型,避免 declare_parameter 抛 InvalidParameterTypeException
+        top, _, leaf = param_name.partition('.')
+        if leaf:
             override.setdefault(top, {})[leaf] = value
         else:
             override[top] = value
@@ -121,17 +105,11 @@ def generate_launch_description():
         name='rviz2',
         output='screen',
         arguments=['-d', LaunchConfiguration('rviz_config')],
-        # 关键:octomap_rviz_plugins 2.1.0 的 .so 编译时没把 liboctomap 写进
-        # DT_NEEDED,而 rviz2 自己又不加载 octomap → dlopen 插件时符号解析失败
-        # (undefined symbol: _ZTIN7octomap13OcTreeStampedE),OccupancyGrid 显示
-        # 加载报错(以前只能退化成 FlatColor 橙色点云就是这个原因)。
-        # 实测:预加载 liboctomap.so.1.9.7 后插件全部符号可解析、dlopen 成功。
-        # 只对 rviz2 注入,不影响同 launch 里的其他节点。
-        # 注意必须用 additional_env 而不是 env:Jazzy 的 launch 里 env= 是
-        # **替换整个环境**(launch/descriptions/executable.py:env 不为 None 时
-        # 就不继承 context.environment),会把 LD_LIBRARY_PATH 冲掉 ——
-        # rviz2 随即找不到 rviz_ogre_vendor 提供的 libOgreMain.so.1.12.10,
-        # 报 "error while loading shared libraries" 并以 127 退出(2026-09-11 实测)。
+        # octomap_rviz_plugins 2.1.0 的 .so 没把 liboctomap 写进 DT_NEEDED,
+        # rviz2 自己又不加载 octomap → dlopen 报 undefined symbol OcTreeStamped;
+        # 预加载 liboctomap.so.1.9.7 解决(只注入 rviz2)。
+        # 必须用 additional_env 而非 env:Jazzy 的 env= 是替换整个环境,
+        # 会冲掉 LD_LIBRARY_PATH,rviz2 因找不到 libOgreMain 以 127 退出(实测)。
         additional_env={'LD_PRELOAD': '/usr/lib/x86_64-linux-gnu/liboctomap.so.1.9.7'},
         condition=IfCondition(LaunchConfiguration('rviz')),
     )

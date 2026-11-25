@@ -1,5 +1,3 @@
-// #ifndef PARAM_H
-// #define PARAM_H
 #pragma once
 
 #include <rclcpp/rclcpp.hpp>
