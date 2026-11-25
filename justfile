@@ -38,3 +38,13 @@ test-backend:
 
 record *args:
     bash -c 'source /opt/ros/{{ros_distro}}/setup.bash && mkdir -p {{ws}}/bags && cd {{ws}}/bags && ros2 bag record /livox/lidar /livox/imu {{args}} -o bag_$(date +%Y%m%d_%H%M%S)'
+
+realsense-setup:
+    bash -c 'raw="https://raw.githubusercontent.com/IntelRealSense/librealsense/master/config/99-realsense-libusb.rules"; \
+    for m in "" https://ghfast.top/ https://gh-proxy.com/ https://ghproxy.net/; do \
+      wget -q --timeout=10 -O /tmp/99-realsense-libusb.rules "$m$raw" && grep -q "RealSense" /tmp/99-realsense-libusb.rules && { echo "via ${m:-direct}"; break; }; \
+    done; grep -q "RealSense" /tmp/99-realsense-libusb.rules || { echo "所有源都失败" >&2; exit 1; }; \
+    sudo cp /tmp/99-realsense-libusb.rules /etc/udev/rules.d/ && \
+    sudo udevadm control --reload-rules && sudo udevadm trigger && \
+    sudo usermod -aG plugdev,video $USER && echo "OK: 拔插 D435i 后重新登录(组生效)"'
+
