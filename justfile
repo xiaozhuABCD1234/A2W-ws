@@ -37,7 +37,11 @@ test-backend:
     bash -c 'source /opt/ros/{{ros_distro}}/setup.bash && cd {{ws}} && colcon test --packages-select point_lio_backend && colcon test-result --verbose'
 
 record *args:
-    bash -c 'source /opt/ros/{{ros_distro}}/setup.bash && mkdir -p {{ws}}/bags && cd {{ws}}/bags && ros2 bag record /livox/lidar /livox/imu {{args}} -o bag_$(date +%Y%m%d_%H%M%S)'
+    bash -c 'source /opt/ros/{{ros_distro}}/setup.bash && mkdir -p {{ws}}/bags && cd {{ws}}/bags && \
+    topics="/livox/lidar /livox/imu"; \
+    timeout 2 ros2 topic hz /camera/camera/color/image_raw --window 3 >/dev/null 2>&1 && topics="$topics /camera/camera/color/image_raw /camera/camera/color/camera_info"; \
+    echo "录制话题: $topics"; \
+    ros2 bag record -s mcap --compression-mode file --compression-format zstd $topics {{args}} -o bag_$(date +%Y%m%d_%H%M%S)'
 
 realsense-setup:
     bash -c 'raw="https://raw.githubusercontent.com/IntelRealSense/librealsense/master/config/99-realsense-libusb.rules"; \
