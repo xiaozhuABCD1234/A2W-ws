@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# prepare-commit-msg:在交互式提交模板中注入规约说明,不影响 git commit -m / merge / squash
+set -euo pipefail
+
+. "$(dirname "$0")/lib.sh"
+
+file="$1"
+mode="${2:-}"
+
+case "$mode" in
+  message|template) exit 0 ;;
+esac
+
+[ -s "$file" ] && ! head -n 1 "$file" | grep -q '^#' && exit 0
+
+cat >> "$file" <<EOF
+# 格式: <type>(<scope>): <subject>
+# type: ${ALLOWED_TYPES[*]}
+# scope: src/ 下的包名,如 backend / bringup / driver
+# subject: 中文简述,结尾不加句号,≤72 显示宽度
+# 多类改动用 "; " 连接: fix(backend): xxx; docs: xxx
+EOF

@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# pre-commit:校验分支名、禁止产物路径、文件大小与冲突标记
+set -euo pipefail
+
+. "$(dirname "$0")/lib.sh"
+
+rc=0
+
+branch="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
+if [ -n "$branch" ]; then
+  ok=0
+  for pat in "${BRANCH_PATTERNS[@]}"; do
+    echo "$branch" | grep -Eqx "$pat" && ok=1
+  done
+  if [ "$ok" -ne 1 ]; then
+    err "分支名 '$branch' 不符合规约"
+    for pat in "${BRANCH_PATTERNS[@]}"; do hint "允许: $pat"; done
+    hint "重命名: git branch -m <新名字>"
+    rc=1
+  fi
+fi
+
+while IFS= read -r -d '' f; do
+  for pat in "${FORBIDDEN_PATHS[@]}"; do
+    if echo "$f" | grep -Eq "$pat"; then
+      err "禁止提交产物路径: $f"
+      rc=1
+    fi
+  done
+
+  if [ -f "$f" ]; then
+    size=$(wc -c < "$f")
+    if [ "$size" -gt "$MAX_FILE_SIZE" ]; then
+      err "文件过大($((size / 1024 / 1024))MB > 5MB): $f"
+      rc=1
+    fi
+
+    ext="${f##*.}"
+    if [ "$CHECK_CONFLICT_MARKERS" = 1 ] && [ "$ext" != "pcd" ] && [ "$ext" != "db" ]; then
+      if grep -Eq '^(<<<<<<<|>>>>>>>)( |$)' "$f" 2>/dev/null; then
+        err "存在未解决的冲突标记: $f"
+        rc=1
+      fi
+    fi
+  fi
+done < <(git diff --cached --name-only -z)
+
+exit "$rc"

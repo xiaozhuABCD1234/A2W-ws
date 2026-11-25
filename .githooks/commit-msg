@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# commit-msg:校验提交信息格式,规则详见 docs/git-convention.md
+set -euo pipefail
+
+. "$(dirname "$0")/lib.sh"
+
+file="$1"
+subject="$(head -n 1 "$file")"
+rc=0
+
+case "$subject" in
+  "Revert "*|Merge\ *|merge:*) exit 0 ;;
+esac
+
+IFS=';' read -ra parts <<< "$subject"
+for p in "${parts[@]}"; do
+  p="$(echo "$p" | sed 's/^ *//;s/ *$//')"
+  [ -z "$p" ] && continue
+  check_subject "$p" || rc=1
+done
+
+scope="$(echo "$subject" | sed -nE 's/^[a-z]+\(([a-zA-Z0-9_/-]+)\).*/\1/p')"
+if [ -n "$scope" ] && [ -d src ] && ! ls src | grep -qx "$scope"; then
+  warn "scope '$scope' 不是 src/ 下的包名(可用: $(ls src | tr '\n' ' '))"
+fi
+
+if [ "$(wc -l < "$file")" -gt 1 ]; then
+  second="$(sed -n '2p' "$file")"
+  if [ -n "$second" ] && ! echo "$second" | grep -q '^#'; then
+    err "subject 与正文之间必须空一行"
+    rc=1
+  fi
+  tail -n +2 "$file" | grep -v '^#' | while IFS= read -r line; do
+    w="$(str_width "$line")"
+    if [ "$w" -gt "$BODY_LINE_MAX_LEN" ]; then
+      err "正文行超宽(${w} > ${BODY_LINE_MAX_LEN}): $line"
+      exit 1
+    fi
+  done || rc=1
+fi
+
+if [ "$rc" -ne 0 ]; then
+  echo >&2 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+  echo >&2 "提交信息未通过规约校验,详见上方 ✘ 条目"
+  echo >&2 "跳过校验: git commit --no-verify"
+  echo >&2 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+fi
+
+exit "$rc"
