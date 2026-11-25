@@ -61,12 +61,10 @@ struct GraphParams {
   double odom_rot_sigma_deg = 0.5;
   double loop_trans_sigma = 0.10;    // m
   double loop_rot_sigma_deg = 1.5;
-  double huber_delta = 1.0;
-  int max_iterations = 50;
-  int num_threads = 2;
-  double max_loop_residual_trans = 0.5;  // m
-  double max_loop_residual_rot_deg = 5.0;
-  bool remove_outlier_loops = true;
+  double huber_delta = 1.0;          // 鲁棒核阈值（白化残差单位）
+  int max_iterations = 50;           // LM 最大迭代
+  bool pcm_enabled = true;           // 回环 PCM-lite 两两一致性筛选
+  double pcm_chi2 = 12.59;           // 卡方门限（6 自由度，95%）
 };
 
 struct OutputParams {
@@ -103,7 +101,7 @@ struct Keyframe {
 };
 
 // 回环约束：T_from_to 把 to 帧的点变到 from 帧（p_from = T_from_to * p_to），
-// 与 Ceres 里 Z_ij = T_i^{-1} T_j（i = from, j = to）一致。
+// 与 GTSAM BetweenFactorPose3 的 Z_ij = T_i^{-1} T_j（i = from, j = to）一致。
 struct LoopConstraint {
   int from = -1;
   int to = -1;

@@ -60,10 +60,9 @@
     # 量纲:残差已按 1/σ 加权(平移 ×10/m),Huber δ 同单位。10 即 ~1 m 内二次、之外线性。
     graph.huber_delta: 10.0
     graph.max_iterations: 50
-    graph.num_threads: 2
-    graph.max_loop_residual_trans: 0.5
-    graph.max_loop_residual_rot_deg: 5.0
-    graph.remove_outlier_loops: true
+    # PCM-lite:回环两两一致性筛选(替代残差门控),卡方门限 6 自由度 95%
+    graph.pcm_enabled: true
+    graph.pcm_chi2: 12.59
 
     # ── 输出
     output.map_publish_period: 2.0

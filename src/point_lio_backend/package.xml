@@ -4,8 +4,9 @@
   <name>point_lio_backend</name>
   <version>0.1.0</version>
   <description>
-    Point-LIO 的在线后端：Scan Context 回环检测 + GICP 校验 + Ceres 位姿图优化，
-    输出 map 系纠偏 TF、优化轨迹与优化点云。不修改 vendored point_lio 源码。
+    Point-LIO 的在线后端：Scan Context 回环检测 + GICP 校验 + GTSAM LM 位姿图优化
+    （含 PCM-lite 回环一致性筛选），输出 map 系纠偏 TF、优化轨迹与优化点云。
+    不修改 vendored point_lio 源码。依赖 /usr/local 源码安装的 GTSAM 4.2。
   </description>
   <maintainer email="xiaozhuABCD1234@163.com">xiaozhu</maintainer>
   <license>MIT</license>
@@ -25,7 +26,7 @@
   <depend>diagnostic_msgs</depend>
   <depend>std_srvs</depend>
   <depend>eigen</depend>
-  <depend>libceres-dev</depend>
+  <!-- GTSAM 4.2 为 /usr/local 源码安装，apt/rosdep 无对应键，构建时 find_package 直接命中 -->
 
   <test_depend>ament_cmake_gtest</test_depend>
   <test_depend>ament_lint_auto</test_depend>

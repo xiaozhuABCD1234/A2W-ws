@@ -22,7 +22,8 @@ find_package(diagnostic_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
-find_package(Ceres REQUIRED)
+# GTSAM 4.2 为 /usr/local 源码安装（apt 无 libgtsam-dev），rosdep 不覆盖。
+find_package(GTSAM 4.2 REQUIRED)
 
 include_directories(include ${PCL_INCLUDE_DIRS})
 link_directories(${PCL_LIBRARY_DIRS})
@@ -33,6 +34,7 @@ add_library(point_lio_backend_core STATIC
   src/keyframe_manager.cpp
   src/scan_context.cpp
   src/loop_detector.cpp
+  src/pcm.cpp
   src/pose_graph.cpp
 )
 target_include_directories(point_lio_backend_core PUBLIC
@@ -41,7 +43,7 @@ target_include_directories(point_lio_backend_core PUBLIC
 )
 target_link_libraries(point_lio_backend_core PUBLIC
   Eigen3::Eigen
-  Ceres::ceres
+  gtsam
   ${PCL_LIBRARIES}
 )
 
@@ -75,6 +77,8 @@ if(BUILD_TESTING)
   target_link_libraries(test_scan_context point_lio_backend_core)
   ament_add_gtest(test_pose_graph test/test_pose_graph.cpp)
   target_link_libraries(test_pose_graph point_lio_backend_core)
+  ament_add_gtest(test_pcm test/test_pcm.cpp)
+  target_link_libraries(test_pcm point_lio_backend_core)
   ament_add_gtest(test_keyframe_manager test/test_keyframe_manager.cpp)
   target_link_libraries(test_keyframe_manager point_lio_backend_core)
 endif()

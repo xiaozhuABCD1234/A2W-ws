@@ -6,7 +6,8 @@
 
 namespace point_lio_backend {
 
-// Ceres 6-DOF 位姿图：pose_raw(odom 系) -> pose_opt(map 系)，首节点固定为 map 原点
+// GTSAM LM 6-DOF 位姿图：pose_raw(odom 系) -> pose_opt(map 系)，首节点固定为 map 原点；
+// 回环先经 PCM-lite 两两一致性筛选，边用 Huber 鲁棒核。
 class PoseGraph {
  public:
   explicit PoseGraph(const GraphParams& params);

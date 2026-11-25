@@ -49,10 +49,8 @@
     graph.loop_rot_sigma_deg: 2.0
     graph.huber_delta: 10.0
     graph.max_iterations: 50
-    graph.num_threads: 2
-    graph.max_loop_residual_trans: 0.6
-    graph.max_loop_residual_rot_deg: 6.0
-    graph.remove_outlier_loops: true
+    graph.pcm_enabled: true
+    graph.pcm_chi2: 12.59
 
     output.map_publish_period: 0.5
     output.map_voxel: 0.2

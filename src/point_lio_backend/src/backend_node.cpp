@@ -182,13 +182,8 @@ class BackendNode : public rclcpp::Node {
         declareParam<double>("graph.loop_rot_sigma_deg", graph.loop_rot_sigma_deg);
     graph.huber_delta = declareParam<double>("graph.huber_delta", graph.huber_delta);
     graph.max_iterations = declareParam<int>("graph.max_iterations", graph.max_iterations);
-    graph.num_threads = declareParam<int>("graph.num_threads", graph.num_threads);
-    graph.max_loop_residual_trans = declareParam<double>(
-        "graph.max_loop_residual_trans", graph.max_loop_residual_trans);
-    graph.max_loop_residual_rot_deg = declareParam<double>(
-        "graph.max_loop_residual_rot_deg", graph.max_loop_residual_rot_deg);
-    graph.remove_outlier_loops =
-        declareParam<bool>("graph.remove_outlier_loops", graph.remove_outlier_loops);
+    graph.pcm_enabled = declareParam<bool>("graph.pcm_enabled", graph.pcm_enabled);
+    graph.pcm_chi2 = declareParam<double>("graph.pcm_chi2", graph.pcm_chi2);
 
     auto& out = params_.output;
     out.map_publish_period =
