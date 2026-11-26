@@ -45,8 +45,18 @@ def _setup(context, *args, **kwargs):
     out = LaunchConfiguration('out').perform(context) or f'bag_{datetime.now():%Y%m%d_%H%M%S}'
 
     use_camera = camera == 'true' or (camera == 'auto' and _camera_connected())
+    use_driver = LaunchConfiguration('driver').perform(context).strip().lower() in (
+        '1', 'true', 'yes', 'on')
     topics = [TOPIC_LIDAR, TOPIC_IMU]
     actions = []
+
+    if use_driver:
+        actions.append(LogInfo(msg='启动 mid360_driver'))
+        actions.append(IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(PathJoinSubstitution([
+                FindPackageShare('mid360_driver'), 'launch', 'mid360_driver.launch.py'])),
+            launch_arguments={'use_sim_time': 'false'}.items(),
+        ))
 
     if use_camera:
         topics += [TOPIC_COLOR, TOPIC_CAMERA_INFO]
@@ -64,6 +74,9 @@ def _setup(context, *args, **kwargs):
     else:
         delay = 0.5
         actions.append(LogInfo(msg='未检测到 D435i(camera=auto),仅录制雷达'))
+
+    if use_driver:
+        delay = max(delay, 4.0)
 
     recorder = ExecuteProcess(
         cmd=['ros2', 'bag', 'record',
@@ -93,5 +106,7 @@ def generate_launch_description():
                               description='相机初始化等待秒数(到点即开录,RGB 落后则截掉开头)'),
         DeclareLaunchArgument('out', default_value='',
                               description='bag 输出名,默认 bag_<时间戳>(相对当前目录)'),
+        DeclareLaunchArgument('driver', default_value='true',
+                              description='是否同时启动 mid360_driver;整套已在跑时传 false'),
         OpaqueFunction(function=_setup),
     ])
