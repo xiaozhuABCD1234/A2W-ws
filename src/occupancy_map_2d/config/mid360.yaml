@@ -2,7 +2,7 @@
   ros__parameters:
     world_frame: map
     ground_topic: /ground_segmentation/ground
-    obstacles_topic: /ground_segmentation/obstacles
+    nonground_topic: /ground_segmentation/nonground
     map_topic: /occupancy_map_2d/map
     runtime.stamp_tolerance: 0.05
     runtime.publish_period_ms: 1000

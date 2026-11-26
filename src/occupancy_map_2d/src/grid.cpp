@@ -163,7 +163,7 @@ const std::vector<int>& OccupancyGrid2D::dedupeGroundRays(int sensor_x, int sens
   return ground_ray_cells_;
 }
 
-void OccupancyGrid2D::update(const PointCloudT& ground, const PointCloudT& obstacles,
+void OccupancyGrid2D::update(const PointCloudT& ground, const PointCloudT& nonground,
                              const Eigen::Isometry3d& sensor_to_map) {
   int sensor_x = 0;
   int sensor_y = 0;
@@ -201,7 +201,7 @@ void OccupancyGrid2D::update(const PointCloudT& ground, const PointCloudT& obsta
     }
   };
   project(ground, false, ground_mask_, ground_touched_, ground_cells_);
-  project(obstacles, true, obstacle_mask_, obstacle_touched_, obstacle_cells_);
+  project(nonground, true, obstacle_mask_, obstacle_touched_, obstacle_cells_);
 
   const std::vector<int>* ground_rays = &ground_cells_;
   if (params_.raycast_dedupe_deg > 0.0 && ground_cells_.size() > 1) {

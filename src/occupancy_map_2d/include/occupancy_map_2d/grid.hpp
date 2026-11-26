@@ -52,7 +52,7 @@ class OccupancyGrid2D {
   explicit OccupancyGrid2D(const GridParams& params);
 
   void clear();
-  void update(const PointCloudT& ground, const PointCloudT& obstacles,
+  void update(const PointCloudT& ground, const PointCloudT& nonground,
               const Eigen::Isometry3d& sensor_to_map);
 
   void takeSnapshot(GridSnapshot* snapshot) const;

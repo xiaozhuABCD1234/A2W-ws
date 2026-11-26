@@ -3,20 +3,50 @@
     odom_topic: /aft_mapped_to_init
     cloud_topic: /cloud_registered_body
     ground_topic: /ground_segmentation/ground
-    obstacles_topic: /ground_segmentation/obstacles
-    elevated_topic: /ground_segmentation/elevated
+    nonground_topic: /ground_segmentation/nonground
     runtime.stamp_tolerance: 0.05
     runtime.gravity_align: true
+
+    segmentation.algorithm: patchwork
+
     segmentation.min_range: 0.5
     segmentation.max_range: 30.0
-    segmentation.ring_size: 0.5
-    segmentation.sectors: 120
-    segmentation.min_cell_points: 1
-    segmentation.seed_height_band: 0.15
-    segmentation.ground_height_threshold: 0.12
-    segmentation.max_ground_step: 0.15
-    segmentation.max_slope_deg: 20.0
-    segmentation.ground_alpha: 0.65
-    segmentation.initial_ground_tolerance: 0.8
-    segmentation.elevated_height: 2.0
-    segmentation.ground_estimation_range: 10.0
+
+    segmentation.polar.ring_size: 0.5
+    segmentation.polar.sectors: 120
+    segmentation.polar.min_cell_points: 1
+    segmentation.polar.seed_height_band: 0.15
+    segmentation.polar.ground_height_threshold: 0.12
+    segmentation.polar.max_ground_step: 0.15
+    segmentation.polar.max_slope_deg: 20.0
+    segmentation.polar.ground_alpha: 0.65
+    segmentation.polar.initial_ground_tolerance: 0.8
+    segmentation.polar.ground_estimation_range: 10.0
+
+    segmentation.linefit.ring_size: 0.5
+    segmentation.linefit.sectors: 360
+    segmentation.linefit.num_lpr: 20
+    segmentation.linefit.num_iter: 3
+    segmentation.linefit.min_seed_points: 3
+    segmentation.linefit.th_seeds: 0.20
+    segmentation.linefit.th_dist: 0.10
+    segmentation.linefit.uprightness_thr: 0.707
+    segmentation.linefit.max_slope_deg: 20.0
+    segmentation.linefit.max_ground_step: 0.15
+    segmentation.linefit.initial_ground_tolerance: 0.8
+    segmentation.linefit.ground_bottom_percentile: 0.05
+
+    segmentation.patchwork.zone_ranges: [0.0, 4.0, 8.0, 14.0, 30.0]
+    segmentation.patchwork.sectors_per_zone: [16, 32, 54, 32]
+    segmentation.patchwork.rings_per_zone: [2, 4, 4, 4]
+    segmentation.patchwork.num_lpr: 20
+    segmentation.patchwork.num_iter: 3
+    segmentation.patchwork.min_bucket_points: 5
+    segmentation.patchwork.th_seeds: 0.30
+    segmentation.patchwork.th_dist: 0.125
+    segmentation.patchwork.uprightness_thr: 0.707
+    segmentation.patchwork.flatness_thr: 0.05
+    segmentation.patchwork.max_ground_height: 1.50
+    segmentation.patchwork.ground_bottom_percentile: 0.05
+    segmentation.patchwork.enable_temporal_revert: true
+    segmentation.patchwork.temporal_revert_ratio: 0.5

@@ -36,9 +36,9 @@ class OccupancyMap2DNode : public rclcpp::Node {
         ground_topic_, rclcpp::SensorDataQoS(),
         [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) { groundCallback(msg); },
         sub_options);
-    obstacles_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
-        obstacles_topic_, rclcpp::SensorDataQoS(),
-        [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) { obstaclesCallback(msg); },
+    nonground_sub_ = create_subscription<sensor_msgs::msg::PointCloud2>(
+        nonground_topic_, rclcpp::SensorDataQoS(),
+        [this](const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg) { nongroundCallback(msg); },
         sub_options);
     map_pub_ = create_publisher<nav_msgs::msg::OccupancyGrid>(
         map_topic_, rclcpp::QoS(1).transient_local().reliable());
@@ -69,7 +69,7 @@ class OccupancyMap2DNode : public rclcpp::Node {
   void loadParameters() {
     world_frame_ = param<std::string>("world_frame", world_frame_);
     ground_topic_ = param<std::string>("ground_topic", ground_topic_);
-    obstacles_topic_ = param<std::string>("obstacles_topic", obstacles_topic_);
+    nonground_topic_ = param<std::string>("nonground_topic", nonground_topic_);
     map_topic_ = param<std::string>("map_topic", map_topic_);
     stamp_tolerance_ = param<double>("runtime.stamp_tolerance", stamp_tolerance_);
     publish_period_ms_ = param<int>("runtime.publish_period_ms", publish_period_ms_);
@@ -116,53 +116,53 @@ class OccupancyMap2DNode : public rclcpp::Node {
     matchAndUpdate();
   }
 
-  void obstaclesCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& msg) {
+  void nongroundCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr& msg) {
     auto cloud = std::make_shared<PointCloudT>();
     try {
       pcl::fromROSMsg(*msg, *cloud);
     } catch (const std::exception& exception) {
       RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000,
-                            "obstacle cloud conversion failed: %s", exception.what());
+                            "nonground cloud conversion failed: %s", exception.what());
       return;
     }
     std::lock_guard<std::mutex> lock(input_mutex_);
-    obstacles_ = std::move(cloud);
-    obstacles_stamp_ = rclcpp::Time(msg->header.stamp);
-    obstacles_frame_id_ = msg->header.frame_id;
+    nonground_ = std::move(cloud);
+    nonground_stamp_ = rclcpp::Time(msg->header.stamp);
+    nonground_frame_id_ = msg->header.frame_id;
     matchAndUpdate();
   }
 
   void matchAndUpdate() {
-    if (!ground_ || !obstacles_) return;
+    if (!ground_ || !nonground_) return;
 
-    const double delta = (obstacles_stamp_ - ground_stamp_).seconds();
+    const double delta = (nonground_stamp_ - ground_stamp_).seconds();
     if (std::abs(delta) > stamp_tolerance_) {
       if (delta > 0.0) {
         ground_.reset();
       } else {
-        obstacles_.reset();
+        nonground_.reset();
       }
       return;
     }
 
     const std::shared_ptr<PointCloudT> ground = std::move(ground_);
-    const std::shared_ptr<PointCloudT> obstacles = std::move(obstacles_);
+    const std::shared_ptr<PointCloudT> nonground = std::move(nonground_);
     ground_.reset();
-    obstacles_.reset();
+    nonground_.reset();
 
     try {
       const bool ready = tf_buffer_.canTransform(
-          world_frame_, obstacles_frame_id_, obstacles_stamp_,
+          world_frame_, nonground_frame_id_, nonground_stamp_,
           tf2::durationFromSec(tf_timeout_ms_ > 0 ? static_cast<double>(tf_timeout_ms_) / 1000.0
                                                   : 0.0));
       if (!ready) return;
       const auto transform = tf_buffer_.lookupTransform(
-          world_frame_, obstacles_frame_id_, obstacles_stamp_, tf2::Duration(0));
+          world_frame_, nonground_frame_id_, nonground_stamp_, tf2::Duration(0));
       const Eigen::Isometry3d sensor_to_map = tf2::transformToEigen(transform.transform);
 
       {
         std::lock_guard<std::mutex> lock(grid_mutex_);
-        grid_->update(*ground, *obstacles, sensor_to_map);
+        grid_->update(*ground, *nonground, sensor_to_map);
       }
     } catch (const std::exception& exception) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
@@ -186,7 +186,7 @@ class OccupancyMap2DNode : public rclcpp::Node {
   std::unique_ptr<OccupancyGrid2D> grid_;
   std::string world_frame_ = "map";
   std::string ground_topic_ = "/ground_segmentation/ground";
-  std::string obstacles_topic_ = "/ground_segmentation/obstacles";
+  std::string nonground_topic_ = "/ground_segmentation/nonground";
   std::string map_topic_ = "/occupancy_map_2d/map";
   double stamp_tolerance_ = 0.05;
   int publish_period_ms_ = 1000;
@@ -194,7 +194,7 @@ class OccupancyMap2DNode : public rclcpp::Node {
   tf2_ros::Buffer tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr ground_sub_;
-  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr obstacles_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr nonground_sub_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr map_pub_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr clear_service_;
   rclcpp::TimerBase::SharedPtr publish_timer_;
@@ -202,10 +202,10 @@ class OccupancyMap2DNode : public rclcpp::Node {
   rclcpp::CallbackGroup::SharedPtr output_group_;
   std::mutex input_mutex_;
   std::shared_ptr<PointCloudT> ground_;
-  std::shared_ptr<PointCloudT> obstacles_;
+  std::shared_ptr<PointCloudT> nonground_;
   rclcpp::Time ground_stamp_{0, 0, RCL_ROS_TIME};
-  rclcpp::Time obstacles_stamp_{0, 0, RCL_ROS_TIME};
-  std::string obstacles_frame_id_;
+  rclcpp::Time nonground_stamp_{0, 0, RCL_ROS_TIME};
+  std::string nonground_frame_id_;
   std::mutex grid_mutex_;
 
   GridSnapshot snapshot_;

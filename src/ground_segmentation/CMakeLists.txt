@@ -17,7 +17,11 @@ find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(OpenMP QUIET)
 
-add_library(ground_segmentation_core SHARED src/segmenter.cpp)
+add_library(ground_segmentation_core SHARED
+  src/polar_segmenter.cpp
+  src/linefit_segmenter.cpp
+  src/patchwork_segmenter.cpp
+)
 target_include_directories(ground_segmentation_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>

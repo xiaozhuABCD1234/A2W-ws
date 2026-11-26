@@ -89,10 +89,10 @@ Visualization Manager:
       Color: 60; 230; 120
 
     - Class: rviz_default_plugins/PointCloud2
-      Name: Obstacles
+      Name: Nonground
       Enabled: true
       Topic:
-        Value: /ground_segmentation/obstacles
+        Value: /ground_segmentation/nonground
         Depth: 5
         Durability Policy: Volatile
         Reliability Policy: Best Effort
@@ -100,19 +100,6 @@ Visualization Manager:
       Size (Pixels): 6
       Color Transformer: FlatColor
       Color: 40; 140; 255
-
-    - Class: rviz_default_plugins/PointCloud2
-      Name: Elevated
-      Enabled: true
-      Topic:
-        Value: /ground_segmentation/elevated
-        Depth: 5
-        Durability Policy: Volatile
-        Reliability Policy: Best Effort
-      Style: Points
-      Size (Pixels): 6
-      Color Transformer: FlatColor
-      Color: 255; 60; 200
 
     - Class: octomap_rviz_plugins/OccupancyGrid
       Name: OctomapGrid

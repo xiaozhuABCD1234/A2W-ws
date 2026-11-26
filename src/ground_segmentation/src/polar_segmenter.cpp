@@ -1,4 +1,4 @@
-#include "ground_segmentation/segmenter.hpp"
+#include "ground_segmentation/polar_segmenter.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -8,7 +8,7 @@
 
 namespace ground_segmentation {
 
-PolarGroundSegmenter::PolarGroundSegmenter(const SegmentationParams& params) : params_(params) {
+PolarGroundSegmenter::PolarGroundSegmenter(const PolarParams& params) : params_(params) {
   params_.ring_size = std::max(0.05, params_.ring_size);
   params_.max_range = std::max(params_.min_range + params_.ring_size, params_.max_range);
   params_.sectors = std::max(4, params_.sectors);
@@ -19,7 +19,7 @@ PolarGroundSegmenter::PolarGroundSegmenter(const SegmentationParams& params) : p
 }
 
 SegmentationResult PolarGroundSegmenter::segment(
-    const PointCloudT& cloud, const Eigen::Matrix3d& gravity_rotation) const {
+    const PointCloudT& cloud, const Eigen::Matrix3d& gravity_rotation) {
   SegmentationResult result;
   if (cloud.empty()) return result;
 
@@ -107,30 +107,21 @@ SegmentationResult PolarGroundSegmenter::segment(
       const double ground_z = tracked_ground;
       for (int index : cell) {
         const double dz = level_points[index].z() - ground_z;
-        if (std::abs(dz) <= params_.ground_height_threshold) {
-          labels[index] = 0;
-        } else if (dz >= params_.elevated_height) {
-          labels[index] = 2;
-        } else {
-          labels[index] = 1;
-        }
+        labels[index] = std::abs(dz) <= params_.ground_height_threshold ? 0 : 1;
       }
     }
   }
 
   result.ground->reserve(result.finite_points);
-  result.obstacles->reserve(result.finite_points);
-  result.elevated->reserve(result.finite_points);
+  result.nonground->reserve(result.finite_points);
   for (size_t index = 0; index < cloud.size(); ++index) {
     if (labels[index] == 0) {
       result.ground->push_back(cloud.points[index]);
     } else if (labels[index] == 1) {
-      result.obstacles->push_back(cloud.points[index]);
-    } else if (labels[index] == 2) {
-      result.elevated->push_back(cloud.points[index]);
+      result.nonground->push_back(cloud.points[index]);
     }
   }
-  for (auto* output : {result.ground.get(), result.obstacles.get(), result.elevated.get()}) {
+  for (auto* output : {result.ground.get(), result.nonground.get()}) {
     output->width = static_cast<uint32_t>(output->size());
     output->height = 1;
   }
