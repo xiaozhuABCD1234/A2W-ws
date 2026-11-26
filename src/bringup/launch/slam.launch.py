@@ -225,7 +225,10 @@ def generate_launch_description():
                 LaunchConfiguration(name)).strip().lower() in ('1', 'true', 'yes', 'on')
 
         use_backend = _is_on('backend')
-        want_rviz = _is_on('rviz')
+        has_rviz = _has_package('rviz2')
+        want_rviz = _is_on('rviz') and has_rviz
+        if _is_on('rviz') and not has_rviz:
+            print('[bringup] 本机没有 rviz2,已跳过可视化(其余链路照常)', flush=True)
         want_octomap = _is_on('use_octomap')
         has_octomap_server = _has_package('octomap_server')
         has_octomap_rviz = _has_package('octomap_rviz_plugins')
