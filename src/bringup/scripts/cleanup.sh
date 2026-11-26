@@ -5,12 +5,13 @@
 
 pkill -9 -f 'mid360_driver_nod[e]'     2>/dev/null   # mid360 驱动
 pkill -9 -f 'pointlio_mappi[n]g'       2>/dev/null   # point_lio 建图
+pkill -9 -f 'octomap_server_no[d]e'    2>/dev/null   # octomap_server
 pkill -9 -x rviz2                      2>/dev/null   # rviz2
 
 sleep 1
-left=$(ps -eo cmd | grep -cE 'mid360_driver_nod[e]|pointlio_mappi[n]g' || true)
+left=$(ps -eo cmd | grep -cE 'mid360_driver_nod[e]|pointlio_mappi[n]g|octomap_server_no[d]e' || true)
 if [ "$left" -eq 0 ]; then
     echo "清理完成,重新启动: ros2 launch bringup slam.launch.py"
 else
-    echo "还有 $left 个残留进程,请人工核对: ps -eo pid,cmd | grep -E 'mid360_driver|pointlio'"
+    echo "还有 $left 个残留进程,请人工核对: ps -eo pid,cmd | grep -E 'mid360_driver|pointlio|octomap'"
 fi

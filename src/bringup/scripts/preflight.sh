@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # bringup preflight —— 启动前配置自洽性检查。
 # 这条链路最危险的是静默错配(mid360_driver 直接发 PointCloud2,timestamp 为
-# float64 绝对 Unix 秒;lidar_type/timestamp_unit/话题名/host_ip
+# float64 绝对 Unix 秒;lidar_type/timestamp_unit/话题名/host_ip/octomap 输入
 # 任一错配都不报错,只表现为 rviz 无点云或时间轴错位),故启动前拦住。
 #
 # 用法:preflight.sh [--runtime] [--quiet] [--timeout N] [--topic T]
@@ -52,7 +52,7 @@ fi
 # 先 src/ 后 install/:两者正常一致,不一致会被 C5 报出来
 pick() { for f in "$@"; do [ -f "$f" ] && { printf '%s\n' "$f"; return 0; }; done; return 1; }
 
-PIO_CFG=""; PIO_LAUNCH=""; DRV_CFG=""; DRV_LAUNCH=""; PREPROC=""
+PIO_CFG=""; PIO_LAUNCH=""; DRV_CFG=""; DRV_LAUNCH=""; OCM_CFG=""; OCM_LAUNCH=""; PREPROC=""
 if [ -n "$WS" ]; then
   PIO_CFG="$(pick "$WS/src/point_lio_ros2/config/mid360.yaml" \
                   "$WS/install/point_lio/share/point_lio/config/mid360.yaml")" || true
@@ -62,6 +62,10 @@ if [ -n "$WS" ]; then
                   "$WS/install/mid360_driver/share/mid360_driver/config/param.yaml")" || true
   DRV_LAUNCH="$(pick "$WS/src/mid360_driver/launch/mid360_driver.launch.py" \
                      "$WS/install/mid360_driver/share/mid360_driver/launch/mid360_driver.launch.py")" || true
+  OCM_CFG="$(pick "$WS/src/bringup/config/octomap.yaml" \
+                  "$WS/install/bringup/share/bringup/config/octomap.yaml")" || true
+  OCM_LAUNCH="$(pick "$WS/src/bringup/launch/octomap.launch.py" \
+                    "$WS/install/bringup/share/bringup/launch/octomap.launch.py")" || true
   PREPROC="$(pick "$WS/src/point_lio_ros2/src/preprocess.cpp")" || true
 fi
 
@@ -169,8 +173,8 @@ else
   fi
 fi
 
-# ── C4 host_ip 绑定 ───────────────────────────────────────────────────────
-head2 'C4  host_ip 绑定'
+# ── C4 host_ip 绑定 + octomap 必须吃机体系点云 ─────────────────────────────
+head2 'C4  host_ip 绑定 与 octomap 输入(机体系点云 + 单一真相源)'
 if [ -z "$HOST_IP" ]; then
   warn "读不到驱动 param.yaml 的 host_ip(驱动 bind 会失败)"
 elif ! command -v ip >/dev/null 2>&1; then
@@ -189,7 +193,32 @@ if [ "$BODY_PUB" = "true" ]; then
   pass "scan_bodyframe_pub_en=true,会发 /cloud_registered_body"
 else
   fail "scan_bodyframe_pub_en='${BODY_PUB:-空}',应为 true"
-  info "/cloud_registered_body 是地面分割与 2D 占据图的输入;关掉它地面分割/2D 图全空。"
+  info "octomap_server 把 lookupTransform(frame_id, 点云 frame) 的平移当作射线起点;"
+  info "喂世界系点云会让所有射线从世界原点射出,自由空间全错(地图看着有、其实是错的)。"
+fi
+if [ -n "$OCM_LAUNCH" ] && grep -q "cloud_registered_body" "$OCM_LAUNCH"; then
+  pass "octomap launch 里有 cloud_in -> /cloud_registered_body 重映射"
+else
+  fail "octomap launch 里找不到 /cloud_registered_body 重映射"
+fi
+# 双真相源:resolution / max_range 不应再出现在 launch 的数字默认值里
+dup="$(grep -nE "default_value=['\"][0-9]" "$OCM_LAUNCH" 2>/dev/null | grep -E "resolution|max_range" || true)"
+if [ -n "$dup" ]; then
+  warn "octomap launch 里又出现数字默认值(会盖掉 yaml):"
+  printf '        %s\n' "$dup"
+  info "resolution/max_range 的唯一真相应是 config/octomap.yaml;"
+  info "launch 侧应保持 default_value=''(留空=用 yaml)。"
+else
+  pass "octomap 参数单一真相源(yaml),launch 不再覆盖"
+fi
+if [ -n "$OCM_CFG" ] && [ -n "$DET_RANGE" ]; then
+  OCM_RANGE="$(yaml_get "$OCM_CFG" max_range)"
+  case "$DET_RANGE" in
+    100.0|100|"")
+      info "提示:point_lio det_range=${DET_RANGE:-未设}(≈不限制),远处噪声点会进 SLAM;"
+      info "      收到 20~30 可在预处理阶段就切掉,比只靠 octomap max_range(现 ${OCM_RANGE:-?})更省算力。"
+      ;;
+  esac
 fi
 
 # ── C5 src 与 install 是否同步 ─────────────────────────────────────────────
@@ -199,6 +228,8 @@ if [ -n "$WS" ]; then
   for pair in \
     "$WS/src/mid360_driver/config/param.yaml:$WS/install/mid360_driver/share/mid360_driver/config/param.yaml" \
     "$WS/src/mid360_driver/launch/mid360_driver.launch.py:$WS/install/mid360_driver/share/mid360_driver/launch/mid360_driver.launch.py" \
+    "$WS/src/bringup/config/octomap.yaml:$WS/install/bringup/share/bringup/config/octomap.yaml" \
+    "$WS/src/bringup/launch/octomap.launch.py:$WS/install/bringup/share/bringup/launch/octomap.launch.py" \
     "$WS/src/bringup/launch/slam.launch.py:$WS/install/bringup/share/bringup/launch/slam.launch.py" \
     "$WS/src/point_lio_backend/config/backend_mid360.yaml:$WS/install/point_lio_backend/share/point_lio_backend/config/backend_mid360.yaml" \
     "$WS/src/point_lio_backend/launch/backend_mid360.launch.py:$WS/install/point_lio_backend/share/point_lio_backend/launch/backend_mid360.launch.py" \
@@ -282,17 +313,17 @@ else
       pass "backend $k=$got"
     else
       fail "backend $k='${got:-空}',应为 $want"
-      info "坐标系契约错配会让 rviz 查不到 TF。"
+      info "坐标系契约错配会让 octomap/rviz 查不到 TF。"
     fi
   done
 fi
 if [ -n "$WS" ] && [ -f "$WS/src/bringup/launch/slam.launch.py" ]; then
   ML="$WS/src/bringup/launch/slam.launch.py"
-  if grep -q "backend_mid360.launch.py" "$ML" && grep -q "fixed_frame='map'" "$ML"; then
-    pass "一键 launch 已 include 后端,并在 backend=true 时把 rviz 切到 map 系"
+  if grep -q "backend_mid360.launch.py" "$ML" && grep -q "'frame_id': 'map'" "$ML"; then
+    pass "一键 launch 已 include 后端,并在 backend=true 时把 octomap 切到 map 系"
   else
-    fail "slam.launch.py 缺少 point_lio_backend include 或 Fixed Frame 切 map 系的逻辑"
-    info "backend=true 时 rviz 必须用 map 系,否则看不到纠偏后的位姿。"
+    fail "slam.launch.py 缺少 point_lio_backend include 或 frame_id=map"
+    info "backend=true 时 octomap 必须用 map 系,否则纠偏 TF 不会被 octomap 看到。"
   fi
 fi
 if [ -n "$WS" ]; then
@@ -320,27 +351,27 @@ if [ -n "$WS" ]; then
   fi
 fi
 
-# ── C8 系统依赖:rviz2 / nav2_map_server ─────────────────────────────
-head2 'C8  系统依赖(rviz2 / nav2_map_server)'
+# ── C8 系统依赖:octomap_server / rviz 插件 ──────────────────────────────
+head2 'C8  系统依赖(octomap / rviz)'
 if [ -n "${AMENT_PREFIX_PATH:-}" ]; then
-  has_rviz=0; has_mapsaver=0
+  has_octo=0; has_octo_rviz=0
   IFS_save="$IFS"; IFS=':'
   for p in $AMENT_PREFIX_PATH; do
-    [ -f "$p/share/ament_index/resource_index/packages/rviz2" ] && has_rviz=1
-    [ -f "$p/share/ament_index/resource_index/packages/nav2_map_server" ] && has_mapsaver=1
+    [ -f "$p/share/ament_index/resource_index/packages/octomap_server" ] && has_octo=1
+    [ -f "$p/share/ament_index/resource_index/packages/octomap_rviz_plugins" ] && has_octo_rviz=1
   done
   IFS="$IFS_save"
-  if [ "$has_rviz" = 1 ]; then
-    pass "rviz2 可用(可视化)"
+  if [ "$has_octo" = 1 ]; then
+    pass "octomap_server 可用(3D 占据栅格)"
   else
-    warn "本机没装 rviz2:show_rviz:=true 时启动会失败"
-    info "    sudo apt install ros-jazzy-rviz2"
+    warn "本机没装 octomap_server:一键 launch 会**自动跳过** 3D 栅格(驱动/point_lio/后端照常)"
+    info "要 3D 占据栅格(以及 nav2 的 /projected_map):"
+    info "    sudo apt install ros-jazzy-octomap-server ros-jazzy-octomap-rviz-plugins"
   fi
-  if [ "$has_mapsaver" = 1 ]; then
-    pass "nav2_map_server 可用(justfile save-map 存 2D 图)"
+  if [ "$has_octo_rviz" = 1 ]; then
+    pass "octomap_rviz_plugins 可用"
   else
-    info "本机没装 nav2_map_server:justfile 的 save-map 不可用(不影响建图/重定位)"
-    info "    sudo apt install ros-jazzy-nav2-map-server"
+    info "本机没装 octomap_rviz_plugins:rviz 会用去掉 octomap 显示的配置(其余显示正常)"
   fi
 else
   info "AMENT_PREFIX_PATH 为空(还没 source ROS),跳过系统依赖检查"

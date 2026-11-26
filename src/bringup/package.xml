@@ -5,13 +5,19 @@
   <version>0.1.0</version>
   <description>
     Mid-360 + Point-LIO 的周边集成(Mid-360 驱动 / Point-LIO 均为本仓库内的本地上游包)。
-    一键启动驱动、Point-LIO、后端位姿图、重定位、地面分割、2D 占据图与 rviz。
-    本包只放 launch / rviz 配置,不含编译产物。
+    目前包含:本地 mid360_driver(UDP 被动收流 → PointCloud2/Imu)、
+    Point-LIO 点云 → octomap 三维占据栅格。
+    本包只放 launch / config,不含编译产物。
   </description>
   <maintainer email="xiaozhuABCD1234@163.com">xiaozhu</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>nav_msgs</depend>
+  <depend>octomap</depend>
+  <depend>octomap_msgs</depend>
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
@@ -25,7 +31,8 @@
   <exec_depend>occupancy_map_2d</exec_depend>
   <exec_depend>mid360_driver</exec_depend>
   <exec_depend>pcl_ros</exec_depend>
-  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>octomap_server</exec_depend>
+  <exec_depend>octomap_rviz_plugins</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>
