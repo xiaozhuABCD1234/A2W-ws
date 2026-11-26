@@ -22,15 +22,17 @@ slam *args:
 
 alias run := slam
 
-replay bag="" *args:
+replay bag="" rate="1.0" *args:
     bash -c 'source /opt/ros/{{ros_distro}}/setup.bash && source {{ws}}/install/setup.bash && \
     cd {{ws}} && b="{{bag}}"; b="${b#bag=}"; \
     [ -n "$b" ] || b=$(ls -dt bags/*/ 2>/dev/null | head -1); \
     [ -n "$b" ] || { echo "bags/ 下没有 bag" >&2; exit 1; }; \
-    echo "replay $b"; \
+    r="{{rate}}"; r="${r#rate=}"; \
+    case "$r" in ""|*[!0-9.]*) echo "rate 必须是数字，例如 rate=2 或 1.5（收到 {{rate}}）" >&2; exit 1;; esac; \
+    echo "replay $b rate=$r"; \
     ( trap - INT; exec ros2 launch bringup slam.launch.py use_driver:=false use_sim_time:=true {{args}} ) & \
     LP=$!; trap "kill -INT $LP 2>/dev/null; wait $LP 2>/dev/null" EXIT; \
-    sleep 8 && ros2 bag play "$b" --clock'
+    sleep 8 && ros2 bag play "$b" --clock --rate "$r"'
 
 save-map out="PCD/backend_occ" topic="/occupancy_map_2d/map":
     bash -c 'source /opt/ros/{{ros_distro}}/setup.bash && p="{{out}}"; p="${p#out=}"; case "$p" in /*) ;; *) p="{{ws}}/$p";; esac; \
