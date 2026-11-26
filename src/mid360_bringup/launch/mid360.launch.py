@@ -147,6 +147,9 @@ def generate_launch_description():
     ground_segmentation_arg = DeclareLaunchArgument(
         'ground_segmentation', default_value='true')
 
+    occupancy_map_2d_arg = DeclareLaunchArgument(
+        'occupancy_map_2d', default_value='true')
+
     use_sim_time_arg = DeclareLaunchArgument(
         'use_sim_time', default_value='false')
 
@@ -197,6 +200,17 @@ def generate_launch_description():
             'use_sim_time': LaunchConfiguration('use_sim_time'),
         }.items(),
         condition=IfCondition(LaunchConfiguration('ground_segmentation')),
+    )
+
+    occupancy_map_2d = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(PathJoinSubstitution([
+            FindPackageShare('occupancy_map_2d'),
+            'launch', 'occupancy_map_2d.launch.py',
+        ])),
+        launch_arguments={
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+        }.items(),
+        condition=IfCondition(LaunchConfiguration('occupancy_map_2d')),
     )
 
     def _backend_include(context):
@@ -316,12 +330,14 @@ def generate_launch_description():
         relocalization_arg,
         backend_save_arg,
         ground_segmentation_arg,
+        occupancy_map_2d_arg,
         use_sim_time_arg,
         use_driver_arg,
         driver,
         point_lio,
         relocalization,
         ground_segmentation,
+        occupancy_map_2d,
         OpaqueFunction(function=_backend_include),
         OpaqueFunction(function=_octomap_and_rviz),
     ])

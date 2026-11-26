@@ -32,7 +32,7 @@ replay bag="" *args:
     LP=$!; trap "kill -INT $LP 2>/dev/null; wait $LP 2>/dev/null" EXIT; \
     sleep 8 && ros2 bag play "$b" --clock'
 
-save-map out="PCD/backend_occ" topic="/projected_map":
+save-map out="PCD/backend_occ" topic="/occupancy_map_2d/map":
     bash -c 'source /opt/ros/{{ros_distro}}/setup.bash && p="{{out}}"; p="${p#out=}"; case "$p" in /*) ;; *) p="{{ws}}/$p";; esac; \
     t="{{topic}}"; t="${t#topic=}"; \
     mkdir -p "$(dirname "$p")" && ros2 run nav2_map_server map_saver_cli -t "$t" -f "$p" --ros-args -p save_map_timeout:=10.0'
