@@ -38,14 +38,14 @@
 
     segmentation.patchwork.zone_ranges: [0.0, 4.0, 8.0, 14.0, 30.0]
     segmentation.patchwork.sectors_per_zone: [16, 32, 54, 32]
-    segmentation.patchwork.rings_per_zone: [2, 4, 4, 4]
+    segmentation.patchwork.rings_per_zone: [4, 4, 4, 4]
     segmentation.patchwork.num_lpr: 20
     segmentation.patchwork.num_iter: 3
     segmentation.patchwork.min_bucket_points: 5
     segmentation.patchwork.th_seeds: 0.30
-    segmentation.patchwork.th_dist: 0.125
+    segmentation.patchwork.th_dist: 0.15
     segmentation.patchwork.uprightness_thr: 0.707
-    segmentation.patchwork.flatness_thr: 0.05
+    segmentation.patchwork.flatness_thr: 0.08
     segmentation.patchwork.max_ground_height: 1.50
     segmentation.patchwork.ground_bottom_percentile: 0.05
     segmentation.patchwork.enable_temporal_revert: true
