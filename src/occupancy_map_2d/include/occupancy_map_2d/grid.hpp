@@ -51,7 +51,8 @@ class OccupancyGrid2D {
 
  private:
   bool index(double x, double y, int* cell_x, int* cell_y) const;
-  void raycast(int start_x, int start_y, int end_x, int end_y, bool clear_endpoint);
+  void raycast(int start_x, int start_y, int end_x, int end_y, bool clear_endpoint,
+               const std::vector<uint8_t>* blocked, float occupied_threshold);
   void addFree(int x, int y);
   void addOccupied(int x, int y);
   double probability(int index) const;
@@ -61,6 +62,10 @@ class OccupancyGrid2D {
   int height_ = 0;
   std::vector<float> log_odds_;
   std::vector<uint8_t> observed_;
+  std::vector<uint8_t> ground_mask_;
+  std::vector<uint8_t> obstacle_mask_;
+  std::vector<int> ground_touched_;
+  std::vector<int> obstacle_touched_;
   size_t updated_cells_ = 0;
 };
 

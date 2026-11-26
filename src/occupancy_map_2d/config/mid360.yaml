@@ -15,7 +15,7 @@
     grid.origin_y: -60.0
     grid.max_range: 20.0
     grid.obstacle_min_height: -0.4
-    grid.obstacle_max_height: 2.0
+    grid.obstacle_max_height: 1.0
     grid.occupied_log_odds: 0.85
     grid.free_log_odds: -0.12
     grid.min_log_odds: -5.0
