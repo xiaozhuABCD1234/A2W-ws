@@ -58,8 +58,6 @@ class OccupancyMap2DNode : public rclcpp::Node {
     publish_timer_ = create_wall_timer(
         std::chrono::milliseconds(publish_period_ms_), [this]() { publishMap(false); },
         output_group_);
-    RCLCPP_INFO(get_logger(), "occupancy map started: %dx%d cells at %.3f m",
-                grid_->width(), grid_->height(), grid_->resolution());
   }
 
  private:
@@ -76,7 +74,6 @@ class OccupancyMap2DNode : public rclcpp::Node {
     stamp_tolerance_ = param<double>("runtime.stamp_tolerance", stamp_tolerance_);
     publish_period_ms_ = param<int>("runtime.publish_period_ms", publish_period_ms_);
     tf_timeout_ms_ = param<int>("runtime.tf_timeout_ms", tf_timeout_ms_);
-    log_period_ms_ = param<int>("runtime.log_period_ms", log_period_ms_);
     params_.resolution = param<double>("grid.resolution", params_.resolution);
     params_.width = param<double>("grid.width", params_.width);
     params_.height = param<double>("grid.height", params_.height);
@@ -163,21 +160,9 @@ class OccupancyMap2DNode : public rclcpp::Node {
           world_frame_, obstacles_frame_id_, obstacles_stamp_, tf2::Duration(0));
       const Eigen::Isometry3d sensor_to_map = tf2::transformToEigen(transform.transform);
 
-      const auto start = std::chrono::steady_clock::now();
-      size_t updated = 0;
-      size_t occupied = 0;
       {
         std::lock_guard<std::mutex> lock(grid_mutex_);
         grid_->update(*ground, *obstacles, sensor_to_map);
-        updated = grid_->updatedCells();
-        occupied = grid_->occupiedCells();
-      }
-      const double elapsed_ms = std::chrono::duration<double, std::milli>(
-          std::chrono::steady_clock::now() - start).count();
-      if (log_period_ms_ > 0) {
-        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), log_period_ms_,
-                             "updated=%zu occupied=%zu ground=%zu obstacles=%zu time=%.2f ms",
-                             updated, occupied, ground->size(), obstacles->size(), elapsed_ms);
       }
     } catch (const std::exception& exception) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
@@ -206,7 +191,6 @@ class OccupancyMap2DNode : public rclcpp::Node {
   double stamp_tolerance_ = 0.05;
   int publish_period_ms_ = 1000;
   int tf_timeout_ms_ = 100;
-  int log_period_ms_ = 5000;
   tf2_ros::Buffer tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr ground_sub_;

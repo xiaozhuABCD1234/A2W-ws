@@ -36,8 +36,6 @@ class GroundSegmentationNode : public rclcpp::Node {
         obstacles_topic_, rclcpp::SensorDataQoS());
     elevated_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
         elevated_topic_, rclcpp::SensorDataQoS());
-    RCLCPP_INFO(get_logger(), "ground segmentation started with %d sectors and %.2f m rings",
-                params_.sectors, params_.ring_size);
   }
 
  private:
@@ -61,7 +59,6 @@ class GroundSegmentationNode : public rclcpp::Node {
     elevated_topic_ = param<std::string>("elevated_topic", elevated_topic_);
     stamp_tolerance_ = param<double>("runtime.stamp_tolerance", stamp_tolerance_);
     gravity_align_ = param<bool>("runtime.gravity_align", gravity_align_);
-    log_period_ms_ = param<int>("runtime.log_period_ms", log_period_ms_);
     params_.min_range = param<double>("segmentation.min_range", params_.min_range);
     params_.max_range = param<double>("segmentation.max_range", params_.max_range);
     params_.ring_size = param<double>("segmentation.ring_size", params_.ring_size);
@@ -158,19 +155,10 @@ class GroundSegmentationNode : public rclcpp::Node {
         gravity_rotation = rotation *
             Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix().transpose();
       }
-      const auto start = std::chrono::steady_clock::now();
       const auto result = segmenter_->segment(*frame.cloud, gravity_rotation);
-      const double elapsed_ms = std::chrono::duration<double, std::milli>(
-          std::chrono::steady_clock::now() - start).count();
       publish(ground_pub_, *result.ground, frame.header);
       publish(obstacles_pub_, *result.obstacles, frame.header);
       publish(elevated_pub_, *result.elevated, frame.header);
-      if (log_period_ms_ > 0) {
-        RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), log_period_ms_,
-                             "ground=%zu obstacles=%zu elevated=%zu total=%zu time=%.2f ms",
-                             result.ground->size(), result.obstacles->size(),
-                             result.elevated->size(), result.finite_points, elapsed_ms);
-      }
     } catch (const std::exception& exception) {
       RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000,
                             "ground segmentation failed: %s", exception.what());
@@ -194,7 +182,6 @@ class GroundSegmentationNode : public rclcpp::Node {
   std::string elevated_topic_ = "/ground_segmentation/elevated";
   double stamp_tolerance_ = 0.05;
   bool gravity_align_ = true;
-  int log_period_ms_ = 5000;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr ground_pub_;

@@ -7,7 +7,6 @@
     elevated_topic: /ground_segmentation/elevated
     runtime.stamp_tolerance: 0.05
     runtime.gravity_align: true
-    runtime.log_period_ms: 5000
     segmentation.min_range: 0.5
     segmentation.max_range: 30.0
     segmentation.ring_size: 0.5
