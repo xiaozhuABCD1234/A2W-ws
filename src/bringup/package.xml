@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>mid360_bringup</name>
+  <name>bringup</name>
   <version>0.1.0</version>
   <description>
     Mid-360 + Point-LIO 的周边集成(Mid-360 驱动 / Point-LIO 均为本仓库内的本地上游包)。

@@ -4,13 +4,13 @@
     ros2 launch mid360_driver mid360_driver.launch.py
     ros2 launch point_lio mapping_mid360.launch.py rviz:=false
 
-    ros2 launch mid360_bringup octomap_mid360.launch.py [rviz:=true] [resolution:=0.2 max_range:=15.0]
+    ros2 launch bringup octomap_mid360.launch.py [rviz:=true] [resolution:=0.2 max_range:=15.0]
 
 参数来源:config/octomap_mid360.yaml 是 resolution/max_range 的唯一真相源,
 只有命令行显式传参才覆盖(旧的 default_value='0.1' 写法等于无条件顶掉 yaml,
 改 yaml 不生效)。
 
-日常一键启动:ros2 launch mid360_bringup mid360.launch.py
+日常一键启动:ros2 launch bringup mid360.launch.py
 
 输出:/octomap_full, /octomap_binary(Octomap)/ /octomap_point_cloud_centers
 / /occupied_cells_vis_array(MarkerArray)/ /projected_map(2D 投影,给 nav2)
@@ -46,7 +46,7 @@ def _octomap_node(context):
     改 config/*.yaml 不生效。default_value='' 时只有显式传参才追加覆盖项。
     """
     params = [PathJoinSubstitution([
-        FindPackageShare('mid360_bringup'), 'config', 'octomap_mid360.yaml'
+        FindPackageShare('bringup'), 'config', 'octomap_mid360.yaml'
     ]).perform(context)]
 
     override = {'use_sim_time': _is_on(context, 'use_sim_time')}
@@ -104,7 +104,7 @@ def generate_launch_description():
 
     rviz_config_arg = DeclareLaunchArgument(
         'rviz_config', default_value=PathJoinSubstitution([
-            FindPackageShare('mid360_bringup'), 'rviz', 'octomap_mid360.rviz'
+            FindPackageShare('bringup'), 'rviz', 'octomap_mid360.rviz'
         ]),
         description='rviz 配置文件。后端启用时上层传 rviz/backend_map.rviz(Fixed Frame: map)')
 

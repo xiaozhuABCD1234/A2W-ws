@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # check_tf.sh —— 一键启动后"rviz 看不到东西 / Could not transform"的定位工具
-# 用法: bash src/mid360_bringup/scripts/check_tf.sh [--frames N](先 source 工作空间)
+# 用法: bash src/bringup/scripts/check_tf.sh [--frames N](先 source 工作空间)
 # 步骤:1) 列节点 2) 采 /tf 汇总父子帧边 3) 打印关键话题 frame_id/频率
 #       4) 用当前时间查 map->camera_init(与 rviz 判定一致)
 # 退出码:0 正常 / 1 有问题(打印可操作的下一步)

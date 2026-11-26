@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# mid360_bringup preflight —— 启动前配置自洽性检查。
+# bringup preflight —— 启动前配置自洽性检查。
 # 这条链路最危险的是静默错配(mid360_driver 直接发 PointCloud2,timestamp 为
 # float64 绝对 Unix 秒;lidar_type/timestamp_unit/话题名/host_ip/octomap 输入
 # 任一错配都不报错,只表现为 rviz 无点云或时间轴错位),故启动前拦住。
@@ -62,10 +62,10 @@ if [ -n "$WS" ]; then
                   "$WS/install/mid360_driver/share/mid360_driver/config/param.yaml")" || true
   DRV_LAUNCH="$(pick "$WS/src/mid360_driver/launch/mid360_driver.launch.py" \
                      "$WS/install/mid360_driver/share/mid360_driver/launch/mid360_driver.launch.py")" || true
-  OCM_CFG="$(pick "$WS/src/mid360_bringup/config/octomap_mid360.yaml" \
-                  "$WS/install/mid360_bringup/share/mid360_bringup/config/octomap_mid360.yaml")" || true
-  OCM_LAUNCH="$(pick "$WS/src/mid360_bringup/launch/octomap_mid360.launch.py" \
-                    "$WS/install/mid360_bringup/share/mid360_bringup/launch/octomap_mid360.launch.py")" || true
+  OCM_CFG="$(pick "$WS/src/bringup/config/octomap_mid360.yaml" \
+                  "$WS/install/bringup/share/bringup/config/octomap_mid360.yaml")" || true
+  OCM_LAUNCH="$(pick "$WS/src/bringup/launch/octomap_mid360.launch.py" \
+                    "$WS/install/bringup/share/bringup/launch/octomap_mid360.launch.py")" || true
   PREPROC="$(pick "$WS/src/point_lio_ros2/src/preprocess.cpp")" || true
 fi
 
@@ -228,9 +228,9 @@ if [ -n "$WS" ]; then
   for pair in \
     "$WS/src/mid360_driver/config/param.yaml:$WS/install/mid360_driver/share/mid360_driver/config/param.yaml" \
     "$WS/src/mid360_driver/launch/mid360_driver.launch.py:$WS/install/mid360_driver/share/mid360_driver/launch/mid360_driver.launch.py" \
-    "$WS/src/mid360_bringup/config/octomap_mid360.yaml:$WS/install/mid360_bringup/share/mid360_bringup/config/octomap_mid360.yaml" \
-    "$WS/src/mid360_bringup/launch/octomap_mid360.launch.py:$WS/install/mid360_bringup/share/mid360_bringup/launch/octomap_mid360.launch.py" \
-    "$WS/src/mid360_bringup/launch/mid360.launch.py:$WS/install/mid360_bringup/share/mid360_bringup/launch/mid360.launch.py" \
+    "$WS/src/bringup/config/octomap_mid360.yaml:$WS/install/bringup/share/bringup/config/octomap_mid360.yaml" \
+    "$WS/src/bringup/launch/octomap_mid360.launch.py:$WS/install/bringup/share/bringup/launch/octomap_mid360.launch.py" \
+    "$WS/src/bringup/launch/mid360.launch.py:$WS/install/bringup/share/bringup/launch/mid360.launch.py" \
     "$WS/src/point_lio_backend/config/backend_mid360.yaml:$WS/install/point_lio_backend/share/point_lio_backend/config/backend_mid360.yaml" \
     "$WS/src/point_lio_backend/launch/backend_mid360.launch.py:$WS/install/point_lio_backend/share/point_lio_backend/launch/backend_mid360.launch.py" \
     "$WS/src/point_lio_ros2/config/mid360.yaml:$WS/install/point_lio/share/point_lio/config/mid360.yaml" ; do
@@ -242,7 +242,7 @@ if [ -n "$WS" ]; then
   done
   if [ -n "$stale" ]; then
     warn "src 与 install 里的副本不一致(运行时读的是 install):$stale"
-    info "跑 colcon build --packages-select mid360_driver mid360_bringup point_lio 同步"
+    info "跑 colcon build --packages-select mid360_driver bringup point_lio 同步"
   else
     pass "关心的配置在 src 与 install 中一致"
   fi
@@ -317,8 +317,8 @@ else
     fi
   done
 fi
-if [ -n "$WS" ] && [ -f "$WS/src/mid360_bringup/launch/mid360.launch.py" ]; then
-  ML="$WS/src/mid360_bringup/launch/mid360.launch.py"
+if [ -n "$WS" ] && [ -f "$WS/src/bringup/launch/mid360.launch.py" ]; then
+  ML="$WS/src/bringup/launch/mid360.launch.py"
   if grep -q "get_package_prefix('point_lio_backend')" "$ML" && grep -q "'frame_id': 'map'" "$ML"; then
     pass "一键 launch 已 include 后端,并在 backend=true 时把 octomap 切到 map 系"
   else

@@ -1,6 +1,6 @@
 """离线看 PCD:把点云文件当话题发出来 + rviz 显示,不需要雷达/point_lio 在跑。
 
-    ros2 launch mid360_bringup pcd_view.launch.py [pcd:=...] [show_rviz:=false] [static_tf:=false]
+    ros2 launch bringup pcd_view.launch.py [pcd:=...] [show_rviz:=false] [static_tf:=false]
 
 话题 /cloud_pcd 是 pcd_to_pointcloud 写死的(无 topic 参数),frame_id 由 tf_frame 决定。
 
@@ -81,7 +81,7 @@ def generate_launch_description():
         name='rviz2',
         output='screen',
         arguments=['-d', PathJoinSubstitution([
-            FindPackageShare('mid360_bringup'), 'rviz', 'pcd_view.rviz'
+            FindPackageShare('bringup'), 'rviz', 'pcd_view.rviz'
         ])],
         condition=IfCondition(LaunchConfiguration('show_rviz')),
     )

@@ -1,10 +1,10 @@
 """Mid-360 全栈一键启动:驱动 + point_lio + octomap + rviz(单窗口)。
 
-    ros2 launch mid360_bringup mid360.launch.py
-    ros2 launch mid360_bringup mid360.launch.py show_rviz:=false
-    ros2 launch mid360_bringup mid360.launch.py pcd_save:=true      # 临时开 PCD 落盘(先验地图)
-    ros2 launch mid360_bringup mid360.launch.py backend:=false      # 关后端,octomap 退回 camera_init 系
-    ros2 launch mid360_bringup mid360.launch.py use_driver:=false use_sim_time:=true
+    ros2 launch bringup mid360.launch.py
+    ros2 launch bringup mid360.launch.py show_rviz:=false
+    ros2 launch bringup mid360.launch.py pcd_save:=true      # 临时开 PCD 落盘(先验地图)
+    ros2 launch bringup mid360.launch.py backend:=false      # 关后端,octomap 退回 camera_init 系
+    ros2 launch bringup mid360.launch.py use_driver:=false use_sim_time:=true
 
 point_lio 的 rviz 固定关掉,rviz 由本 launch 直接起。驱动为本地包
 mid360_driver:UDP 收流直接发 /livox/lidar(PointCloud2)与 /livox/imu,
@@ -91,14 +91,14 @@ def _run_preflight():
         print('[preflight] 已按 MID360_SKIP_PREFLIGHT=1 跳过')
         return
     try:
-        script = os.path.join(get_package_prefix('mid360_bringup'), 'lib',
-                              'mid360_bringup', 'preflight.sh')
+        script = os.path.join(get_package_prefix('bringup'), 'lib',
+                              'bringup', 'preflight.sh')
     except Exception as exc:  # ament index 里查不到包
-        print(f'[preflight] 跳过:定位不到 mid360_bringup({exc})')
+        print(f'[preflight] 跳过:定位不到 bringup({exc})')
         return
     if not os.path.isfile(script):
         print(f'[preflight] 跳过:{script} 不存在'
-              '(先 colcon build --packages-select mid360_bringup)')
+              '(先 colcon build --packages-select bringup)')
         return
 
     proc = subprocess.run([script, '--quiet'], capture_output=True, text=True)
@@ -270,7 +270,7 @@ def generate_launch_description():
         if want_octomap and has_octomap_server:
             actions.append(IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(PathJoinSubstitution([
-                    FindPackageShare('mid360_bringup'),
+                    FindPackageShare('bringup'),
                     'launch', 'octomap_mid360.launch.py',
                 ])),
                 launch_arguments={
@@ -279,7 +279,7 @@ def generate_launch_description():
                 }.items(),
             ))
             actions.append(Node(
-                package='mid360_bringup',
+                package='bringup',
                 executable='map_watchdog',
                 name='map_watchdog',
                 output='screen',
@@ -300,7 +300,7 @@ def generate_launch_description():
         if show_rviz:
             from launch_ros.substitutions import FindPackageShare as _FPS
             template = PathJoinSubstitution([
-                _FPS('mid360_bringup'), 'rviz',
+                _FPS('bringup'), 'rviz',
                 'backend_map.rviz' if use_backend else 'octomap_mid360.rviz',
             ]).perform(context)
             rviz_cfg = _prepare_rviz_config(

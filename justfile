@@ -14,11 +14,11 @@ clean:
 record *args:
     bash -c 'source /opt/ros/{{ros_distro}}/setup.bash && source {{ws}}/install/setup.bash && \
     mkdir -p {{ws}}/bags && cd {{ws}}/bags && \
-    ros2 launch mid360_bringup record_mid360.launch.py {{args}}'
+    ros2 launch bringup record_mid360.launch.py {{args}}'
 
 slam *args:
     bash -c 'source /opt/ros/{{ros_distro}}/setup.bash && source {{ws}}/install/setup.bash && \
-    cd {{ws}} && ros2 launch mid360_bringup mid360.launch.py {{args}}'
+    cd {{ws}} && ros2 launch bringup mid360.launch.py {{args}}'
 
 alias run := slam
 
@@ -28,7 +28,7 @@ replay bag="" *args:
     [ -n "$b" ] || b=$(ls -dt bags/*/ 2>/dev/null | head -1); \
     [ -n "$b" ] || { echo "bags/ 下没有 bag" >&2; exit 1; }; \
     echo "replay $b"; \
-    ( trap - INT; exec ros2 launch mid360_bringup mid360.launch.py use_driver:=false use_sim_time:=true {{args}} ) & \
+    ( trap - INT; exec ros2 launch bringup mid360.launch.py use_driver:=false use_sim_time:=true {{args}} ) & \
     LP=$!; trap "kill -INT $LP 2>/dev/null; wait $LP 2>/dev/null" EXIT; \
     sleep 8 && ros2 bag play "$b" --clock'
 
