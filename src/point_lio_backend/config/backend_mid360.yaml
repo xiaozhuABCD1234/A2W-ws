@@ -64,6 +64,9 @@
     graph.pcm_enabled: true
     graph.pcm_chi2: 12.59
 
+    relocalization.enabled: true
+    relocalization.correction_topic: /relocalization/correction
+
     # ── 输出
     output.map_publish_period: 2.0
     output.map_voxel: 0.2

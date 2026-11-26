@@ -139,6 +139,11 @@ def generate_launch_description():
         description='是否启动 point_lio_backend(回环检测 + 位姿图)。true 时 octomap 与 rviz '
                     '切到 map 系;false 时退回改造前行为(camera_init 系)')
 
+    relocalization_arg = DeclareLaunchArgument(
+        'relocalization', default_value='true')
+
+    backend_save_arg = DeclareLaunchArgument('backend_save', default_value='')
+
     use_sim_time_arg = DeclareLaunchArgument(
         'use_sim_time', default_value='false')
 
@@ -169,6 +174,17 @@ def generate_launch_description():
         }.items(),
     )
 
+    relocalization = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(PathJoinSubstitution([
+            FindPackageShare('relocalization'),
+            'launch', 'relocalization.launch.py',
+        ])),
+        launch_arguments={
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+        }.items(),
+        condition=IfCondition(LaunchConfiguration('relocalization')),
+    )
+
     def _backend_include(context):
         """backend:=true 时 include 后端,包找不到就给出可操作报错。
 
@@ -189,6 +205,12 @@ def generate_launch_description():
                 '  若 install/point_lio_backend 不存在,先:\n'
                 '      colcon build --packages-select point_lio_backend\n'
                 '  只用前端(point_lio + octomap,不要回环):加 backend:=false')
+        backend_save = context.perform_substitution(
+            LaunchConfiguration('backend_save')).strip()
+        use_relocalization = context.perform_substitution(
+            LaunchConfiguration('relocalization')).strip().lower() in ('1', 'true', 'yes', 'on')
+        if not backend_save and use_relocalization:
+            backend_save = 'false'
         return [IncludeLaunchDescription(
             PythonLaunchDescriptionSource(PathJoinSubstitution([
                 FindPackageShare('point_lio_backend'),
@@ -196,6 +218,7 @@ def generate_launch_description():
             ])),
             launch_arguments={
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
+                'save_pcd': backend_save,
             }.items(),
         )]
 
@@ -276,10 +299,13 @@ def generate_launch_description():
         pcd_save_arg,
         backend_arg,
         use_octomap_arg,
+        relocalization_arg,
+        backend_save_arg,
         use_sim_time_arg,
         use_driver_arg,
         driver,
         point_lio,
+        relocalization,
         OpaqueFunction(function=_backend_include),
         OpaqueFunction(function=_octomap_and_rviz),
     ])

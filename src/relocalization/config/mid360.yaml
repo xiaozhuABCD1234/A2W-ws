@@ -1,0 +1,41 @@
+/**:
+  ros__parameters:
+    world_frame: map
+    odom_frame: camera_init
+    odom_topic: /aft_mapped_to_init
+    cloud_topic: /cloud_registered_body
+    correction_topic: /relocalization/correction
+    map.path: PCD/backend_map.pcd
+    map.auto_start: true
+    confirmation.frames: 3
+    confirmation.translation_tolerance: 1.0
+    confirmation.rotation_tolerance_deg: 10.0
+    runtime.max_attempts: 30
+    runtime.submap_frames: 4
+    runtime.submap_voxel: 0.2
+    runtime.min_frame_interval: 0.5
+    runtime.stamp_tolerance: 0.05
+    runtime.gravity_align: true
+    search.pyramid_voxels: [1.5, 0.75, 0.35]
+    search.coarse_xy_step: 2.0
+    search.coarse_z_step: 1.0
+    search.coarse_yaw_step_deg: 30.0
+    search.z_min: -1.0
+    search.z_max: 1.0
+    search.max_candidates: 6
+    search.max_query_points: 400
+    gicp.filter_ground: true
+    gicp.ground_distance_threshold: 0.10
+    gicp.voxel: 0.25
+    gicp.max_points: 3000
+    gicp.max_iterations: 50
+    gicp.max_correspondence: 1.5
+    gicp.validation_correspondence: 0.5
+    gicp.max_fitness: 0.08
+    gicp.min_inlier_ratio: 0.45
+    validation.max_roll_pitch_deg: 12.0
+    validation.max_refinement_translation: 3.0
+    validation.max_refinement_rotation_deg: 35.0
+    validation.min_ambiguity_margin: 0.01
+    validation.ambiguity_translation: 3.0
+    validation.ambiguity_rotation_deg: 30.0

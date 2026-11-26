@@ -67,6 +67,11 @@ struct GraphParams {
   double pcm_chi2 = 12.59;           // 卡方门限（6 自由度，95%）
 };
 
+struct RelocalizationInputParams {
+  bool enabled = false;
+  std::string correction_topic = "/relocalization/correction";
+};
+
 struct OutputParams {
   double map_publish_period = 2.0;   // s
   double map_voxel = 0.2;            // m
@@ -127,6 +132,7 @@ struct BackendParams {
   KeyframeParams keyframe;
   IcpParams icp;
   GraphParams graph;
+  RelocalizationInputParams relocalization;
   OutputParams output;
   RuntimeParams runtime;
 };

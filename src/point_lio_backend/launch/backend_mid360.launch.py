@@ -10,10 +10,9 @@
 import os
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -41,17 +40,26 @@ def generate_launch_description():
     use_sim_time_arg = DeclareLaunchArgument(
         'use_sim_time', default_value='false')
 
-    backend_node = Node(
-        package='point_lio_backend',
-        executable='point_lio_backend_node',
-        name='point_lio_backend',
-        output='screen',
-        parameters=[
-            LaunchConfiguration('params_file'),
-            {'use_sim_time': ParameterValue(
-                LaunchConfiguration('use_sim_time'), value_type=bool)},
-        ],
-        additional_env=_clean_ld_library_path(),
-    )
+    save_pcd_arg = DeclareLaunchArgument('save_pcd', default_value='')
 
-    return LaunchDescription([params_arg, use_sim_time_arg, backend_node])
+    def _backend_node(context):
+        params = [
+            LaunchConfiguration('params_file').perform(context),
+            {'use_sim_time': context.perform_substitution(
+                LaunchConfiguration('use_sim_time')).strip().lower() in ('1', 'true', 'yes', 'on')}
+        ]
+        save_pcd = context.perform_substitution(LaunchConfiguration('save_pcd')).strip().lower()
+        if save_pcd:
+            params.append({'output.save_pcd': save_pcd in ('1', 'true', 'yes', 'on')})
+        return [Node(
+            package='point_lio_backend',
+            executable='point_lio_backend_node',
+            name='point_lio_backend',
+            output='screen',
+            parameters=params,
+            additional_env=_clean_ld_library_path(),
+        )]
+
+    return LaunchDescription([
+        params_arg, use_sim_time_arg, save_pcd_arg, OpaqueFunction(function=_backend_node)
+    ])

@@ -185,6 +185,11 @@ class BackendNode : public rclcpp::Node {
     graph.pcm_enabled = declareParam<bool>("graph.pcm_enabled", graph.pcm_enabled);
     graph.pcm_chi2 = declareParam<double>("graph.pcm_chi2", graph.pcm_chi2);
 
+    params_.relocalization.enabled =
+        declareParam<bool>("relocalization.enabled", params_.relocalization.enabled);
+    params_.relocalization.correction_topic = declareParam<std::string>(
+        "relocalization.correction_topic", params_.relocalization.correction_topic);
+
     auto& out = params_.output;
     out.map_publish_period =
         declareParam<double>("output.map_publish_period", out.map_publish_period);
@@ -236,6 +241,15 @@ class BackendNode : public rclcpp::Node {
           cloudCallback(msg);
         },
         sub_options);
+    if (params_.relocalization.enabled) {
+      relocalization_sub_ = create_subscription<geometry_msgs::msg::TransformStamped>(
+          params_.relocalization.correction_topic, rclcpp::QoS(10),
+          [this](const geometry_msgs::msg::TransformStamped::ConstSharedPtr msg) {
+            std::lock_guard<std::mutex> lock(relocalization_mutex_);
+            pending_relocalization_ = tf2::transformToEigen(msg->transform);
+          },
+          sub_options);
+    }
 
     path_pub_ = create_publisher<nav_msgs::msg::Path>(params_.path_topic, rclcpp::QoS(10));
     path_raw_pub_ =
@@ -508,6 +522,8 @@ class BackendNode : public rclcpp::Node {
         keyframe.pose_opt = keyframe.pose_raw;
       }
 
+      applyPendingRelocalization(&keyframe);
+
       const auto t_detect0 = std::chrono::steady_clock::now();
       const std::optional<LoopConstraint> loop =
           loop_detector_->detect(keyframe, keyframes_);
@@ -566,6 +582,27 @@ class BackendNode : public rclcpp::Node {
     } catch (...) {
       RCLCPP_ERROR(get_logger(), "worker keyframe unknown exception");
     }
+  }
+
+  void applyPendingRelocalization(Keyframe* current) {
+    std::optional<Eigen::Isometry3d> correction;
+    {
+      std::lock_guard<std::mutex> lock(relocalization_mutex_);
+      correction = pending_relocalization_;
+      pending_relocalization_.reset();
+    }
+    if (!correction || !correction->matrix().allFinite()) return;
+    {
+      std::lock_guard<std::mutex> lock(state_mutex_);
+      const Eigen::Isometry3d delta = *correction * target_correction_.inverse();
+      for (auto& keyframe : keyframes_) {
+        keyframe.pose_opt = delta * keyframe.pose_opt;
+      }
+      current->pose_opt = *correction * current->pose_raw;
+      target_correction_ = *correction;
+      map_dirty_ = true;
+    }
+    RCLCPP_INFO(get_logger(), "applied prior map relocalization correction");
   }
 
   void runOptimization() {
@@ -1037,6 +1074,7 @@ class BackendNode : public rclcpp::Node {
   rclcpp::CallbackGroup::SharedPtr timer_group_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::TransformStamped>::SharedPtr relocalization_sub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_pub_;
   rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr path_raw_pub_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr odom_pub_;
@@ -1064,6 +1102,9 @@ class BackendNode : public rclcpp::Node {
   bool has_odom_ = false;
   Eigen::Isometry3d prev_odom_pose_ = Eigen::Isometry3d::Identity();
   bool has_prev_odom_ = false;
+
+  std::mutex relocalization_mutex_;
+  std::optional<Eigen::Isometry3d> pending_relocalization_;
 
   std::mutex state_mutex_;
   std::vector<Keyframe> keyframes_;
