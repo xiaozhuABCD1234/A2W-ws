@@ -61,28 +61,30 @@ Visualization Manager:
     #     Name: cloud_registered
     #     Enabled: true
     #     Topic: {Value: /cloud_registered}
-    # 或者直接把 Fixed Frame 改成 camera_init 再用旧配置 octomap.rviz。
+    # 或者直接把 Fixed Frame 改成 camera_init。
 
-    # octomap(map 系,后端启用时)
-    - Class: octomap_rviz_plugins/OccupancyGrid
-      Name: OctomapGrid
-      Enabled: false
-      Topic:
-        Value: /octomap_binary
-      Voxel Rendering: Occupied Voxels
-      Voxel Coloring: Z-Axis
-      Voxel Alpha: 0.9
-      Max. Octree Depth: 16
-
-    - Class: rviz_default_plugins/PointCloud2
-      Name: Octomap_fallback_points
+    # 2D 占据图(occupancy_map_2d,map 系)
+    - Class: rviz_default_plugins/Map
+      Name: OccupancyMap2D
       Enabled: true
       Topic:
-        Value: /octomap_point_cloud_centers
+        Value: /occupancy_map_2d/map
+        Depth: 5
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Alpha: 0.7
+      Color Scheme: map
+
+    # 地面分割结果(map 系)
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Obstacles
+      Enabled: true
+      Topic:
+        Value: /ground_segmentation/obstacles
       Style: Points
       Size (Pixels): 3
       Color Transformer: FlatColor
-      Color: 255; 140; 0
+      Color: 0; 200; 255
 
     # 坐标系:map -> camera_init(后端) -> body(point_lio)
     - Class: rviz_default_plugins/TF

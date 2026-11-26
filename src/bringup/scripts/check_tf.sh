@@ -32,14 +32,11 @@ echo
 echo "── 1. 节点 ──────────────────────────────────────────────────────────────"
 NODES="$(timeout 8 ros2 node list 2>/dev/null | sort)"
 printf '%s\n' "$NODES" | sed 's/^/        /'
-for n in /mid360_driver /laserMapping /point_lio_backend /octomap_server; do
+for n in /mid360_driver /laserMapping /point_lio_backend; do
   if printf '%s\n' "$NODES" | grep -qx -- "$n"; then
     ok "节点 $n 在跑"
   else
-    case "$n" in
-      /octomap_server) warn "节点 $n 不在(没装 octomap_server 或 use_octomap:=false 属正常)" ;;
-      *) bad "节点 $n 不在跑"; FAIL=1 ;;
-    esac
+    bad "节点 $n 不在跑"; FAIL=1
   fi
 done
 
@@ -105,7 +102,7 @@ check_topic() {
 }
 check_topic /backend/map_points map
 check_topic /backend/path map
-check_topic /octomap_point_cloud_centers map
+check_topic /occupancy_map_2d/map map
 check_topic /cloud_registered camera_init
 check_topic /cloud_registered_body body
 
