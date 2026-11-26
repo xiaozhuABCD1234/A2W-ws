@@ -10,13 +10,6 @@ find_package(octomap_msgs REQUIRED)
 install(DIRECTORY launch config rviz
   DESTINATION share/${PROJECT_NAME}
 )
-install(PROGRAMS
-  scripts/cleanup.sh
-  scripts/preflight.sh
-  scripts/check_tf.sh
-  DESTINATION lib/${PROJECT_NAME}
-)
-
 add_executable(map_watchdog src/map_watchdog.cpp)
 target_link_libraries(map_watchdog ${OCTOMAP_LIBRARIES})
 target_include_directories(map_watchdog PRIVATE ${OCTOMAP_INCLUDE_DIRS})

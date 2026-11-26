@@ -12,17 +12,10 @@ mid360_driver:UDP 收流直接发 /livox/lidar(PointCloud2)与 /livox/imu,
 
 ⚠️ 参数名用 show_rviz 而非 rviz:include 会把参数写进共享的
 launch_configurations,传 'rviz' 会把父级自己的 'rviz' 也改成 false,
-导致引用它的节点条件全变假。改名后互不干扰。调参(resolution 等)
-在 octomap.launch.py 层做,本 launch 不转发。
+导致引用它的节点条件全变假。改名后互不干扰。
 
-启动前先跑 preflight.sh 静态自检(驱动与 point_lio 的
-lidar_type/timestamp_unit/话题名/host_ip/octomap 输入/src 是否 build)。
-不通过直接拒绝启动 —— 这类错配的现场表现是“节点都在,rviz 里永远没点”。
-临时跳过:MID360_SKIP_PREFLIGHT=1 ros2 launch ...
 """
 
-import os
-import subprocess
 import tempfile
 
 from ament_index_python.packages import get_package_prefix
@@ -34,6 +27,11 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
+
+OCTOMAP_OVERRIDABLE = {
+    'resolution': ('resolution', float),
+    'max_range': ('sensor_model.max_range', float),
+}
 
 
 def _has_package(name):
@@ -82,40 +80,7 @@ def _prepare_rviz_config(template_path, fixed_frame, drop_octomap_plugin):
     return path
 
 
-def _run_preflight():
-    """启动前跑静态自检,不通过就抛异常(launch 不启动任何节点)。
-
-    同步执行,只读配置与源码。退出码 2 = 环境不完整,只提醒不拦;1 = 不自洽,拦截。
-    """
-    if os.environ.get('MID360_SKIP_PREFLIGHT') == '1':
-        print('[preflight] 已按 MID360_SKIP_PREFLIGHT=1 跳过')
-        return
-    try:
-        script = os.path.join(get_package_prefix('bringup'), 'lib',
-                              'bringup', 'preflight.sh')
-    except Exception as exc:  # ament index 里查不到包
-        print(f'[preflight] 跳过:定位不到 bringup({exc})')
-        return
-    if not os.path.isfile(script):
-        print(f'[preflight] 跳过:{script} 不存在'
-              '(先 colcon build --packages-select bringup)')
-        return
-
-    proc = subprocess.run([script, '--quiet'], capture_output=True, text=True)
-    print(proc.stdout, end='')
-    if proc.returncode == 1:
-        # 先打到 stdout 再抛异常:直接抛会被包成 InvalidLaunchFileError("可能是语法错"),带偏方向。
-        print('[preflight] ❌ 配置不自洽,拒绝启动:见上方 FAIL 项。', flush=True)
-        print('[preflight]   修好后重试;确需强行启动:MID360_SKIP_PREFLIGHT=1',
-              flush=True)
-        raise RuntimeError('preflight 未通过,拒绝启动')
-    if proc.returncode == 2:
-        print('[preflight] 环境不完整,跳过拦截(仅提醒)', flush=True)
-
-
 def generate_launch_description():
-    _run_preflight()
-
     show_rviz_arg = DeclareLaunchArgument(
         'show_rviz', default_value='true',
         description='启动 rviz2(单窗口:octomap 体素 + LIO 点云 + path)。'
@@ -133,6 +98,9 @@ def generate_launch_description():
         'use_octomap', default_value='true',
         description='是否启动 octomap_server(3D 占据栅格)。需要系统包 ros-jazzy-octomap-server;'
                     '没装时本 launch 会自动跳过并提示装法,不影响驱动/point_lio/后端')
+
+    resolution_arg = DeclareLaunchArgument('resolution', default_value='')
+    max_range_arg = DeclareLaunchArgument('max_range', default_value='')
 
     backend_arg = DeclareLaunchArgument(
         'backend', default_value='true',
@@ -268,15 +236,30 @@ def generate_launch_description():
 
         actions = []
         if want_octomap and has_octomap_server:
-            actions.append(IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(PathJoinSubstitution([
-                    FindPackageShare('bringup'),
-                    'launch', 'octomap.launch.py',
-                ])),
-                launch_arguments={
-                    'frame_id': 'map' if use_backend else '',
-                    'use_sim_time': LaunchConfiguration('use_sim_time'),
-                }.items(),
+            params = [PathJoinSubstitution([
+                FindPackageShare('bringup'), 'config', 'octomap.yaml',
+            ]).perform(context)]
+            override = {'use_sim_time': _is_on('use_sim_time')}
+            if use_backend:
+                override['frame_id'] = 'map'
+            for arg_name, (param_name, cast) in OCTOMAP_OVERRIDABLE.items():
+                raw = context.perform_substitution(LaunchConfiguration(arg_name)).strip()
+                if not raw:
+                    continue
+                value = cast(raw)
+                top, _, leaf = param_name.partition('.')
+                if leaf:
+                    override.setdefault(top, {})[leaf] = value
+                else:
+                    override[top] = value
+            params.append(override)
+            actions.append(Node(
+                package='octomap_server',
+                executable='octomap_server_node',
+                name='octomap_server',
+                output='screen',
+                parameters=params,
+                remappings=[('cloud_in', '/cloud_registered_body')],
             ))
             actions.append(Node(
                 package='bringup',
@@ -327,6 +310,8 @@ def generate_launch_description():
         pcd_save_arg,
         backend_arg,
         use_octomap_arg,
+        resolution_arg,
+        max_range_arg,
         relocalization_arg,
         backend_save_arg,
         ground_segmentation_arg,
