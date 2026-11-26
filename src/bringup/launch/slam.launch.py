@@ -143,7 +143,7 @@ def generate_launch_description():
     point_lio = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([
             FindPackageShare('point_lio'),
-            'launch', 'mapping_slam.launch.py',
+            'launch', 'mapping_mid360.launch.py',
         ])),
         launch_arguments={
             'rviz': 'false',
@@ -215,7 +215,7 @@ def generate_launch_description():
         return [IncludeLaunchDescription(
             PythonLaunchDescriptionSource(PathJoinSubstitution([
                 FindPackageShare('point_lio_backend'),
-                'launch', 'backend_slam.launch.py',
+                'launch', 'backend_mid360.launch.py',
             ])),
             launch_arguments={
                 'use_sim_time': LaunchConfiguration('use_sim_time'),

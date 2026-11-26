@@ -56,8 +56,8 @@ PIO_CFG=""; PIO_LAUNCH=""; DRV_CFG=""; DRV_LAUNCH=""; PREPROC=""
 if [ -n "$WS" ]; then
   PIO_CFG="$(pick "$WS/src/point_lio_ros2/config/mid360.yaml" \
                   "$WS/install/point_lio/share/point_lio/config/mid360.yaml")" || true
-  PIO_LAUNCH="$(pick "$WS/src/point_lio_ros2/launch/mapping_slam.launch.py" \
-                     "$WS/install/point_lio/share/point_lio/launch/mapping_slam.launch.py")" || true
+  PIO_LAUNCH="$(pick "$WS/src/point_lio_ros2/launch/mapping_mid360.launch.py" \
+                     "$WS/install/point_lio/share/point_lio/launch/mapping_mid360.launch.py")" || true
   DRV_CFG="$(pick "$WS/src/mid360_driver/config/param.yaml" \
                   "$WS/install/mid360_driver/share/mid360_driver/config/param.yaml")" || true
   DRV_LAUNCH="$(pick "$WS/src/mid360_driver/launch/mid360_driver.launch.py" \
@@ -201,7 +201,7 @@ if [ -n "$WS" ]; then
     "$WS/src/mid360_driver/launch/mid360_driver.launch.py:$WS/install/mid360_driver/share/mid360_driver/launch/mid360_driver.launch.py" \
     "$WS/src/bringup/launch/slam.launch.py:$WS/install/bringup/share/bringup/launch/slam.launch.py" \
     "$WS/src/point_lio_backend/config/backend_mid360.yaml:$WS/install/point_lio_backend/share/point_lio_backend/config/backend_mid360.yaml" \
-    "$WS/src/point_lio_backend/launch/backend_slam.launch.py:$WS/install/point_lio_backend/share/point_lio_backend/launch/backend_slam.launch.py" \
+    "$WS/src/point_lio_backend/launch/backend_mid360.launch.py:$WS/install/point_lio_backend/share/point_lio_backend/launch/backend_mid360.launch.py" \
     "$WS/src/point_lio_ros2/config/mid360.yaml:$WS/install/point_lio/share/point_lio/config/mid360.yaml" ; do
     a="${pair%%:*}"; b="${pair##*:}"
     if [ -f "$a" ] && [ -f "$b" ] && ! cmp -s "$a" "$b"; then
@@ -260,7 +260,7 @@ if [ -n "$PIO_LAUNCH" ]; then
     fi
   fi
 else
-  pass "未找到 point_lio 的 mapping_slam.launch.py,跳过"
+  pass "未找到 point_lio 的 mapping_mid360.launch.py,跳过"
 fi
 
 # ── C7 后端回环/位姿图(point_lio_backend) ────────────────────────────────
@@ -288,7 +288,7 @@ else
 fi
 if [ -n "$WS" ] && [ -f "$WS/src/bringup/launch/slam.launch.py" ]; then
   ML="$WS/src/bringup/launch/slam.launch.py"
-  if grep -q "backend_slam.launch.py" "$ML" && grep -q "fixed_frame='map'" "$ML"; then
+  if grep -q "backend_mid360.launch.py" "$ML" && grep -q "fixed_frame='map'" "$ML"; then
     pass "一键 launch 已 include 后端,并在 backend=true 时把 rviz 切到 map 系"
   else
     fail "slam.launch.py 缺少 point_lio_backend include 或 Fixed Frame 切 map 系的逻辑"
