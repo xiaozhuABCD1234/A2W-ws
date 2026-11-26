@@ -20,7 +20,7 @@ find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(OpenMP QUIET)
 
-add_library(relocalization_core SHARED src/relocator.cpp)
+add_library(relocalization_core SHARED src/relocator.cpp src/voxel_index.cpp)
 target_include_directories(relocalization_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
@@ -54,6 +54,12 @@ install(TARGETS relocalization_core relocalization_node
 )
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_relocator test/test_relocator.cpp)
+  target_link_libraries(test_relocator relocalization_core)
+endif()
 
 ament_export_targets(relocalization_targets HAS_LIBRARY_TARGET)
 ament_export_dependencies(Eigen3 PCL)

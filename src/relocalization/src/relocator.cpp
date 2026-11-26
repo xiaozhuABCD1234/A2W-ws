@@ -1,116 +1,251 @@
 #include "relocalization/relocator.hpp"
 
-#include <pcl/common/transforms.h>
-#include <pcl/filters/extract_indices.h>
 #include <pcl/filters/voxel_grid.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/registration/gicp.h>
-#include <pcl/segmentation/sac_segmentation.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <limits>
+#include <numeric>
+#include <random>
 #include <sstream>
+#include <utility>
 
 namespace relocalization {
+
 namespace {
 
 constexpr double kPi = 3.14159265358979323846;
+constexpr double kTwoPi = 2.0 * kPi;
 
-double wrapAngle(double angle) {
-  while (angle > kPi) angle -= 2.0 * kPi;
-  while (angle < -kPi) angle += 2.0 * kPi;
-  return angle;
+double yawOf(const Eigen::Matrix3d& rotation) {
+  return std::atan2(rotation(1, 0), rotation(0, 0));
 }
 
-double rotationDistance(const Eigen::Matrix3d& a, const Eigen::Matrix3d& b) {
-  return Eigen::AngleAxisd(a.transpose() * b).angle();
-}
-
-std::vector<double> axisValues(double minimum, double maximum, double step) {
-  std::vector<double> values;
-  if (!(maximum >= minimum) || !(step > 0.0)) return values;
-  for (double value = minimum; value < maximum; value += step) {
-    values.push_back(value);
-    if (values.size() > 200000) break;
+Eigen::Vector3d estimateUp(const PointCloudT& cloud) {
+  const Eigen::Vector3d fallback(0.0, 0.0, 1.0);
+  if (cloud.size() < 200) return fallback;
+  std::mt19937 rng(0x9e3779b9u);
+  std::uniform_int_distribution<size_t> pick(0, cloud.size() - 1);
+  std::vector<Eigen::Vector3d> points;
+  points.reserve(cloud.size());
+  for (const auto& point : cloud.points) {
+    points.emplace_back(point.x, point.y, point.z);
   }
-  if (values.empty() || maximum - values.back() > 1.0e-6) values.push_back(maximum);
-  return values;
+  const double threshold = 0.2;
+  size_t best_inliers = 0;
+  Eigen::Vector3d best_normal = fallback;
+  for (int iteration = 0; iteration < 300; ++iteration) {
+    const Eigen::Vector3d& a = points[pick(rng)];
+    const Eigen::Vector3d& b = points[pick(rng)];
+    const Eigen::Vector3d& c = points[pick(rng)];
+    Eigen::Vector3d normal = (b - a).cross(c - a);
+    const double norm = normal.norm();
+    if (norm < 1.0e-6) continue;
+    normal /= norm;
+    if (std::abs(normal.z()) < 0.5) continue;
+    if (normal.z() < 0.0) normal = -normal;
+    size_t inliers = 0;
+    for (const auto& point : points) {
+      if (std::abs(normal.dot(point - a)) < threshold) ++inliers;
+    }
+    if (inliers > best_inliers) {
+      best_inliers = inliers;
+      best_normal = normal;
+    }
+  }
+  if (best_inliers < points.size() / 40) return fallback;
+  return best_normal;
 }
+
+double rotationDistanceDeg(const Eigen::Matrix3d& a, const Eigen::Matrix3d& b) {
+  return Eigen::AngleAxisd(a.transpose() * b).angle() * 180.0 / kPi;
+}
+
+Eigen::Matrix3d yawRotation(double yaw) {
+  return Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+}
+
+template <typename Pose>
+struct TopK {
+  explicit TopK(size_t capacity) : capacity_(std::max<size_t>(1, capacity)) {
+    heap_.reserve(capacity_);
+  }
+
+  void push(const Pose& pose) {
+    if (heap_.size() < capacity_) {
+      heap_.push_back(pose);
+      std::push_heap(heap_.begin(), heap_.end(), Worse());
+      return;
+    }
+    if (pose.score > heap_.front().score) {
+      std::pop_heap(heap_.begin(), heap_.end(), Worse());
+      heap_.back() = pose;
+      std::push_heap(heap_.begin(), heap_.end(), Worse());
+    }
+  }
+
+  std::vector<Pose> take() { return std::move(heap_); }
+
+  struct Worse {
+    bool operator()(const Pose& lhs, const Pose& rhs) const { return lhs.score > rhs.score; }
+  };
+
+  size_t capacity_;
+  std::vector<Pose> heap_;
+};
 
 }
 
-PriorMapRelocator::PriorMapRelocator(const RelocalizationParams& params) : params_(params) {}
+PriorMapRelocator::PriorMapRelocator(const RelocalizationParams& params) : params_(params) {
+  if (params_.pyramid_voxels.empty()) params_.pyramid_voxels = {2.0, 1.0, 0.5, 0.25};
+  std::vector<double> voxels;
+  for (double voxel : params_.pyramid_voxels) {
+    if (voxel > 0.0) voxels.push_back(voxel);
+  }
+  std::sort(voxels.begin(), voxels.end(), std::greater<double>());
+  voxels.erase(std::unique(voxels.begin(), voxels.end()), voxels.end());
+  params_.pyramid_voxels = voxels;
+
+  std::vector<int> keep;
+  for (size_t i = 0; i < params_.pyramid_voxels.size(); ++i) {
+    const int value = i < params_.level_keep.size() ? params_.level_keep[i]
+                                                    : std::max(4, 240 >> static_cast<int>(i));
+    keep.push_back(std::max(1, value));
+  }
+  params_.level_keep = keep;
+}
+
+size_t PriorMapRelocator::keepFor(size_t level) const {
+  if (params_.level_keep.empty()) return 32;
+  return static_cast<size_t>(params_.level_keep[std::min(level, params_.level_keep.size() - 1)]);
+}
+
+double PriorMapRelocator::levelResolution(size_t level) const {
+  if (level >= levels_.size()) return 0.0;
+  return levels_[level].index.resolution();
+}
 
 bool PriorMapRelocator::loadMap(const std::string& path, std::string* error) {
-  levels_.clear();
-  map_size_ = 0;
-  PointCloudPtr map(new PointCloudT());
-  if (pcl::io::loadPCDFile<PointT>(path, *map) != 0) {
+  PointCloudPtr cloud(new PointCloudT());
+  if (pcl::io::loadPCDFile<PointT>(path, *cloud) != 0) {
     if (error) *error = "failed to load " + path;
     return false;
   }
-  PointCloudPtr finite_map(new PointCloudT());
-  finite_map->reserve(map->size());
-  for (const auto& point : map->points) {
-    if (std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z)) {
-      finite_map->push_back(point);
-    }
+  return loadCloud(*cloud, error);
+}
+
+bool PriorMapRelocator::loadCloud(const PointCloudT& cloud, std::string* error) {
+  levels_.clear();
+  verify_target_.reset();
+  verify_index_.clear();
+  map_size_ = 0;
+  z_min_ = 0.0;
+  z_max_ = 0.0;
+
+  PointCloudPtr finite(new PointCloudT());
+  finite->reserve(cloud.size());
+  for (const auto& point : cloud.points) {
+    if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) continue;
+    finite->push_back(point);
   }
-  if (finite_map->size() < 20) {
-    if (error) *error = "prior map has fewer than 20 finite points";
+  if (finite->size() < 50) {
+    if (error) *error = "prior map has fewer than 50 finite points";
     return false;
   }
-  map_min_ = Eigen::Vector3d::Constant(std::numeric_limits<double>::max());
-  map_max_ = Eigen::Vector3d::Constant(std::numeric_limits<double>::lowest());
-  for (const auto& point : finite_map->points) {
-    const Eigen::Vector3d p(point.x, point.y, point.z);
-    map_min_ = map_min_.cwiseMin(p);
-    map_max_ = map_max_.cwiseMax(p);
-  }
-  map_size_ = finite_map->size();
+  finite->width = static_cast<uint32_t>(finite->size());
+  finite->height = 1;
 
-  std::vector<double> voxels = params_.pyramid_voxels;
-  voxels.erase(std::remove_if(voxels.begin(), voxels.end(),
-                              [](double value) { return !(value > 0.0); }),
-               voxels.end());
-  if (voxels.empty()) voxels.push_back(0.5);
-  std::sort(voxels.begin(), voxels.end(), std::greater<double>());
-  voxels.erase(std::unique(voxels.begin(), voxels.end()), voxels.end());
-  for (double voxel_size : voxels) {
+  min_ = Eigen::Vector3d::Constant(std::numeric_limits<double>::max());
+  max_ = Eigen::Vector3d::Constant(std::numeric_limits<double>::lowest());
+  std::vector<float> zs;
+  zs.reserve(finite->size());
+  for (const auto& point : finite->points) {
+    min_ = min_.cwiseMin(Eigen::Vector3d(point.x, point.y, point.z));
+    max_ = max_.cwiseMax(Eigen::Vector3d(point.x, point.y, point.z));
+    zs.push_back(point.z);
+  }
+  const size_t tail = static_cast<size_t>(0.002 * static_cast<double>(zs.size() - 1));
+  const size_t low_index = tail;
+  const size_t high_index = zs.size() - 1 - tail;
+  std::nth_element(zs.begin(), zs.begin() + low_index, zs.end());
+  const double z_low = zs[low_index];
+  std::nth_element(zs.begin() + low_index, zs.begin() + high_index, zs.end());
+  const double z_high = zs[high_index];
+
+  double z_min = z_low;
+  double z_max = z_high;
+  if (!params_.auto_z_range) {
+    z_min = std::min(params_.z_min, params_.z_max);
+    z_max = std::max(params_.z_min, params_.z_max);
+  }
+  z_min += params_.z_margin;
+  z_max -= params_.z_margin;
+  if (!(z_max > z_min)) {
+    z_min = z_low;
+    z_max = z_high;
+  }
+  if (!(z_max > z_min)) {
+    z_min = min_.z();
+    z_max = max_.z();
+  }
+  z_min_ = z_min;
+  z_max_ = z_max;
+
+  levels_.reserve(params_.pyramid_voxels.size());
+  for (double voxel : params_.pyramid_voxels) {
     Level level;
-    level.voxel = voxel_size;
-    level.cloud = downsample(*finite_map, voxel_size, 0);
-    if (level.cloud->size() < 20) {
-      levels_.clear();
-      map_size_ = 0;
-      if (error) *error = "prior map pyramid level has fewer than 20 points";
-      return false;
-    }
-    level.tree.setInputCloud(level.cloud);
+    level.index.build(*finite, voxel);
+    if (level.index.empty()) continue;
     levels_.push_back(std::move(level));
   }
+  if (levels_.size() < 2) {
+    levels_.clear();
+    if (error) *error = "voxel pyramid needs at least two non-empty levels";
+    return false;
+  }
+
+  const double verify_voxel = std::max(params_.validation_correspondence, params_.gicp_voxel);
+  up_ = estimateUp(*downsample(*finite, levels_.front().index.resolution(), 40000));
+  verify_index_.build(*finite, verify_voxel);
+  verify_target_ = downsample(*finite, params_.gicp_voxel, params_.gicp_max_points);
+  if (!verify_target_ || verify_target_->size() < 20) {
+    levels_.clear();
+    if (error) *error = "gICP target cloud has fewer than 20 points";
+    return false;
+  }
+  map_size_ = finite->size();
   return true;
 }
 
 PointCloudPtr PriorMapRelocator::downsample(const PointCloudT& cloud, double voxel,
-                                             int max_points) const {
+                                            int max_points) const {
   PointCloudPtr filtered(new PointCloudT());
-  if (voxel > 0.0) {
-    pcl::VoxelGrid<PointT> filter;
+  if (voxel > 0.0 && !cloud.empty()) {
+    PointCloudConstPtr input(&cloud, [](const PointCloudT*) {});
+    pcl::VoxelGrid<PointT> grid;
     const float leaf = static_cast<float>(voxel);
-    filter.setLeafSize(leaf, leaf, leaf);
-    filter.setInputCloud(PointCloudConstPtr(new PointCloudT(cloud)));
-    filter.filter(*filtered);
+    grid.setLeafSize(leaf, leaf, leaf);
+    grid.setInputCloud(input);
+    grid.filter(*filtered);
   } else {
     *filtered = cloud;
   }
-  if (max_points > 0 && filtered->size() > static_cast<size_t>(max_points)) {
+  if (max_points > 0 && static_cast<int>(filtered->size()) > max_points) {
+    std::vector<int> indices(filtered->size());
+    std::iota(indices.begin(), indices.end(), 0);
+    std::mt19937 rng(0x5eed1234u);
+    for (int i = 0; i < max_points; ++i) {
+      std::uniform_int_distribution<int> dist(i, static_cast<int>(indices.size()) - 1);
+      std::swap(indices[static_cast<size_t>(i)], indices[static_cast<size_t>(dist(rng))]);
+    }
     PointCloudPtr thinned(new PointCloudT());
     thinned->reserve(static_cast<size_t>(max_points));
-    const double stride = static_cast<double>(filtered->size()) / max_points;
-    for (double index = 0.0; index < static_cast<double>(filtered->size()); index += stride) {
-      thinned->push_back(filtered->points[static_cast<size_t>(index)]);
+    for (int i = 0; i < max_points; ++i) {
+      thinned->push_back(filtered->points[static_cast<size_t>(indices[static_cast<size_t>(i)])]);
     }
     filtered.swap(thinned);
   }
@@ -119,290 +254,374 @@ PointCloudPtr PriorMapRelocator::downsample(const PointCloudT& cloud, double vox
   return filtered;
 }
 
-std::vector<PriorMapRelocator::Candidate> PriorMapRelocator::globalSearch(const Level& level,
-                                                        const PointCloudT& query) const {
-  const auto xs = axisValues(map_min_.x(), map_max_.x(), params_.coarse_xy_step);
-  const auto ys = axisValues(map_min_.y(), map_max_.y(), params_.coarse_xy_step);
-  const double z_min = params_.search_z_min;
-  const double z_max = params_.search_z_max;
-  const auto zs = axisValues(z_min, z_max, params_.coarse_z_step);
-  const double yaw_step = params_.coarse_yaw_step_deg * kPi / 180.0;
-  const auto yaws = axisValues(-kPi, kPi - yaw_step, yaw_step);
-  std::vector<Eigen::Isometry3d> poses;
-  poses.reserve(xs.size() * ys.size() * zs.size() * yaws.size());
-  for (double x : xs) {
-    for (double y : ys) {
-      for (double z : zs) {
-        for (double yaw : yaws) {
-          Eigen::Isometry3d pose = Eigen::Isometry3d::Identity();
-          pose.translation() = Eigen::Vector3d(x, y, z);
-          pose.linear() = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
-          poses.push_back(pose);
+double PriorMapRelocator::tiltFromUp(const Eigen::Matrix3d& rotation) const {
+  const Eigen::Vector3d axis = rotation * Eigen::Vector3d::UnitZ();
+  return std::acos(std::clamp(axis.dot(up_), -1.0, 1.0)) * 180.0 / kPi;
+}
+
+Eigen::Matrix3d PriorMapRelocator::upAlignment() const {
+  const Eigen::Vector3d unit_z(0.0, 0.0, 1.0);
+  return Eigen::Quaterniond::FromTwoVectors(unit_z, up_).toRotationMatrix();
+}
+
+std::vector<Eigen::Matrix3d> PriorMapRelocator::buildTilts(
+    const Eigen::Isometry3d& odom_pose) const {
+  std::vector<Eigen::Matrix3d> seeds;
+  auto add = [&seeds](const Eigen::Matrix3d& rotation) {
+    for (const auto& seed : seeds) {
+      if (Eigen::AngleAxisd(seed.transpose() * rotation).angle() * 180.0 / kPi < 1.0) return;
+    }
+    seeds.push_back(rotation);
+  };
+
+  const Eigen::Matrix3d rotation = odom_pose.linear();
+  add(yawRotation(-yawOf(rotation)) * rotation);
+  add(Eigen::Matrix3d::Identity());
+  add(upAlignment());
+  if (params_.tilt_mode == TiltMode::Odom) return seeds;
+
+  const double step_deg = std::max(1.0, params_.tilt_step_deg);
+  const double step = step_deg * kPi / 180.0;
+  if (params_.tilt_mode == TiltMode::Free) {
+    const int roll_steps = static_cast<int>(std::round(kPi / step));
+    const int pitch_steps = static_cast<int>(std::round(0.5 * kPi / step));
+    if (roll_steps * (2 * pitch_steps + 1) > 2048) return seeds;
+    std::vector<Eigen::Matrix3d> global;
+    for (int roll = -roll_steps; roll < roll_steps; ++roll) {
+      for (int pitch = -pitch_steps; pitch <= pitch_steps; ++pitch) {
+        global.push_back(
+            Eigen::AngleAxisd(roll * step, Eigen::Vector3d::UnitX()).toRotationMatrix() *
+            Eigen::AngleAxisd(pitch * step, Eigen::Vector3d::UnitY()).toRotationMatrix());
+      }
+    }
+    return global;
+  }
+
+  const int steps = std::max(1, static_cast<int>(std::round(params_.tilt_deg / step_deg)));
+  const Eigen::Matrix3d base = upAlignment();
+  for (int roll = -steps; roll <= steps; ++roll) {
+    for (int pitch = -steps; pitch <= steps; ++pitch) {
+      add(base * Eigen::AngleAxisd(roll * step, Eigen::Vector3d::UnitX()).toRotationMatrix() *
+          Eigen::AngleAxisd(pitch * step, Eigen::Vector3d::UnitY()).toRotationMatrix());
+    }
+  }
+  return seeds;
+}
+
+double PriorMapRelocator::scorePose(const Level& level, const PointCloudT& query,
+                                    const Eigen::Matrix3d& rotation,
+                                    const Eigen::Vector3d& translation) const {
+  if (query.empty()) return 0.0;
+  const VoxelIndex& index = level.index;
+  const Eigen::Matrix3f rotation_f = rotation.cast<float>();
+  const Eigen::Vector3f translation_f = translation.cast<float>();
+  size_t hits = 0;
+  for (const auto& point : query.points) {
+    const Eigen::Vector3f transformed = rotation_f * point.getVector3fMap() + translation_f;
+    if (index.occupied(transformed)) ++hits;
+  }
+  return static_cast<double>(hits) / static_cast<double>(query.size());
+}
+
+std::vector<PriorMapRelocator::ScoredPose> PriorMapRelocator::searchGlobal(
+    const PointCloudT& query, const std::vector<Eigen::Matrix3d>& tilts) const {
+  const Level& level = levels_.front();
+  const double resolution = level.index.resolution();
+  const double yaw_step = std::max(1.0, params_.coarse_yaw_step_deg) * kPi / 180.0;
+  const int yaw_count = std::max(1, static_cast<int>(std::lround(kTwoPi / yaw_step)));
+
+  std::vector<Eigen::Matrix3d> rotations;
+  rotations.reserve(static_cast<size_t>(yaw_count) * tilts.size());
+  for (const auto& tilt : tilts) {
+    for (int i = 0; i < yaw_count; ++i) {
+      rotations.push_back(yawRotation(i * yaw_step) * tilt);
+    }
+  }
+
+  const long long nx = static_cast<long long>(std::floor((max_.x() - min_.x()) / resolution)) + 1;
+  const long long ny = static_cast<long long>(std::floor((max_.y() - min_.y()) / resolution)) + 1;
+  const long long nz = static_cast<long long>(std::floor((z_max_ - z_min_) / resolution)) + 1;
+  const long long nrot = static_cast<long long>(rotations.size());
+  const size_t keep = keepFor(0);
+
+  std::vector<ScoredPose> merged;
+  merged.reserve(keep);
+
+#pragma omp parallel
+  {
+    TopK<ScoredPose> local(keep);
+#pragma omp for schedule(dynamic, 1)
+    for (long long ix = 0; ix < nx; ++ix) {
+      const double x = min_.x() + static_cast<double>(ix) * resolution;
+      for (long long iy = 0; iy < ny; ++iy) {
+        const double y = min_.y() + static_cast<double>(iy) * resolution;
+        for (long long iz = 0; iz < nz; ++iz) {
+          const double z = z_min_ + static_cast<double>(iz) * resolution;
+          const Eigen::Vector3d translation(x, y, z);
+          for (long long ir = 0; ir < nrot; ++ir) {
+            ScoredPose pose;
+            pose.pose.linear() = rotations[static_cast<size_t>(ir)];
+            pose.pose.translation() = translation;
+            pose.score = scorePose(level, query, pose.pose.linear(), pose.pose.translation());
+            local.push(pose);
+          }
         }
       }
     }
+#pragma omp critical
+    {
+      std::vector<ScoredPose> items = local.take();
+      merged.insert(merged.end(), items.begin(), items.end());
+    }
   }
-  return selectCandidates(scorePoses(level, query, poses), params_.coarse_xy_step,
-                          yaw_step);
+  return prune(std::move(merged), keep);
 }
 
-std::vector<PriorMapRelocator::Candidate> PriorMapRelocator::refine(
-    const Level& level, const PointCloudT& query, const std::vector<Candidate>& parents,
-    double xy_step, double z_step, double yaw_step) const {
-  std::vector<Eigen::Isometry3d> poses;
-  poses.reserve(parents.size() * 81);
+std::vector<PriorMapRelocator::ScoredPose> PriorMapRelocator::expandLevel(
+    size_t level_index, const PointCloudT& query, const std::vector<ScoredPose>& parents) const {
+  const Level& level = levels_[level_index];
+  const double resolution = level.index.resolution();
+  const double base_yaw_step = std::max(1.0, params_.coarse_yaw_step_deg) * kPi / 180.0;
+  const double yaw_step = base_yaw_step * std::pow(0.5, static_cast<double>(level_index));
+
+  std::vector<ScoredPose> children;
+  children.reserve(parents.size() * 81);
   for (const auto& parent : parents) {
-    const double parent_yaw =
-        std::atan2(parent.pose.linear()(1, 0), parent.pose.linear()(0, 0));
-    for (int ix = -1; ix <= 1; ++ix) {
-      for (int iy = -1; iy <= 1; ++iy) {
-        for (int iz = -1; iz <= 1; ++iz) {
-          for (int iyaw = -1; iyaw <= 1; ++iyaw) {
-            Eigen::Isometry3d pose = Eigen::Isometry3d::Identity();
-            pose.translation() = parent.pose.translation() +
-                                 Eigen::Vector3d(ix * xy_step, iy * xy_step, iz * z_step);
-            pose.linear() = Eigen::AngleAxisd(wrapAngle(parent_yaw + iyaw * yaw_step),
-                                              Eigen::Vector3d::UnitZ())
-                                .toRotationMatrix();
-            if (insideSearchBounds(pose)) poses.push_back(pose);
+    const double parent_yaw = yawOf(parent.pose.linear());
+    const Eigen::Matrix3d tilt = yawRotation(-parent_yaw) * parent.pose.linear();
+    for (int dx = -1; dx <= 1; ++dx) {
+      for (int dy = -1; dy <= 1; ++dy) {
+        for (int dz = -1; dz <= 1; ++dz) {
+          const Eigen::Vector3d translation =
+              parent.pose.translation() +
+              Eigen::Vector3d(dx, dy, dz) * static_cast<double>(resolution);
+          if (!insideBounds(translation, 2.0 * resolution)) continue;
+          for (int dyaw = -1; dyaw <= 1; ++dyaw) {
+            ScoredPose child;
+            child.pose.linear() = yawRotation(parent_yaw + dyaw * yaw_step) * tilt;
+            child.pose.translation() = translation;
+            children.push_back(child);
           }
         }
       }
     }
   }
-  return selectCandidates(scorePoses(level, query, poses), xy_step, yaw_step);
-}
+  if (children.empty()) return children;
 
-std::vector<PriorMapRelocator::Candidate> PriorMapRelocator::scorePoses(
-    const Level& level, const PointCloudT& query,
-    const std::vector<Eigen::Isometry3d>& poses) const {
-  std::vector<Candidate> scored(poses.size());
-#pragma omp parallel for schedule(dynamic, 1) if(poses.size() > 16)
-  for (long long index = 0; index < static_cast<long long>(poses.size()); ++index) {
-    Candidate candidate;
-    candidate.pose = poses[static_cast<size_t>(index)];
-    candidate.score = scorePose(level, query, candidate.pose);
-    scored[static_cast<size_t>(index)] = candidate;
+  std::vector<double> scores(children.size(), 0.0);
+#pragma omp parallel for schedule(dynamic, 16)
+  for (long long i = 0; i < static_cast<long long>(children.size()); ++i) {
+    const ScoredPose& child = children[static_cast<size_t>(i)];
+    scores[static_cast<size_t>(i)] =
+        scorePose(level, query, child.pose.linear(), child.pose.translation());
   }
-  return scored;
+  for (size_t i = 0; i < children.size(); ++i) children[i].score = scores[i];
+  return children;
 }
 
-std::vector<PriorMapRelocator::Candidate> PriorMapRelocator::selectCandidates(
-    std::vector<Candidate> candidates, double translation_separation,
-    double yaw_separation) const {
-  candidates.erase(std::remove_if(candidates.begin(), candidates.end(),
-                                  [](const Candidate& candidate) {
-                                    return !std::isfinite(candidate.score) ||
-                                           candidate.score <= 0.0;
-                                  }),
-                   candidates.end());
-  std::sort(candidates.begin(), candidates.end(),
-            [](const Candidate& lhs, const Candidate& rhs) { return lhs.score > rhs.score; });
-  std::vector<Candidate> selected;
-  const int limit = std::max(1, params_.max_candidates);
-  for (const auto& candidate : candidates) {
+std::vector<PriorMapRelocator::ScoredPose> PriorMapRelocator::prune(
+    std::vector<ScoredPose> poses, size_t keep) const {
+  if (poses.empty() || keep == 0) return std::vector<ScoredPose>();
+  const size_t limited = std::min(keep, poses.size());
+  std::partial_sort(poses.begin(), poses.begin() + static_cast<long>(limited), poses.end(),
+                    [](const ScoredPose& lhs, const ScoredPose& rhs) {
+                      return lhs.score > rhs.score;
+                    });
+  poses.resize(limited);
+  const double threshold = std::max(params_.level_min_score,
+                                    params_.level_keep_ratio * poses.front().score);
+  std::vector<ScoredPose> kept;
+  kept.reserve(limited);
+  for (auto& pose : poses) {
+    if (pose.score < threshold) break;
+    kept.push_back(std::move(pose));
+  }
+  return kept;
+}
+
+std::vector<PriorMapRelocator::ScoredPose> PriorMapRelocator::selectDistinct(
+    const std::vector<ScoredPose>& poses, int limit) const {
+  std::vector<ScoredPose> selected;
+  const int max_count = std::max(1, limit);
+  selected.reserve(static_cast<size_t>(max_count));
+  for (const auto& pose : poses) {
     bool separated = true;
     for (const auto& other : selected) {
-      const double translation =
-          (candidate.pose.translation() - other.pose.translation()).norm();
-      const double rotation = rotationDistance(candidate.pose.linear(), other.pose.linear());
-      if (translation < translation_separation * 0.75 && rotation < yaw_separation * 0.75) {
+      const double translation = (pose.pose.translation() - other.pose.translation()).norm();
+      const double rotation = rotationDistanceDeg(pose.pose.linear(), other.pose.linear());
+      if (translation < std::max(0.1, params_.min_candidate_separation) &&
+          rotation < std::max(1.0, params_.min_candidate_rotation_deg)) {
         separated = false;
         break;
       }
     }
-    if (separated) selected.push_back(candidate);
-    if (static_cast<int>(selected.size()) >= limit) break;
+    if (!separated) continue;
+    selected.push_back(pose);
+    if (static_cast<int>(selected.size()) >= max_count) break;
   }
   return selected;
 }
 
-double PriorMapRelocator::scorePose(const Level& level, const PointCloudT& query,
-                                    const Eigen::Isometry3d& pose) const {
-  if (query.empty()) return 0.0;
-  const double max_distance = std::max(0.5, 1.5 * level.voxel);
-  const double max_squared = max_distance * max_distance;
-  size_t inliers = 0;
-  double proximity = 0.0;
-  std::vector<int> indices(1);
-  std::vector<float> distances(1);
-  for (const auto& point : query.points) {
-    const Eigen::Vector3d transformed = pose * Eigen::Vector3d(point.x, point.y, point.z);
-    PointT query_point;
-    query_point.x = static_cast<float>(transformed.x());
-    query_point.y = static_cast<float>(transformed.y());
-    query_point.z = static_cast<float>(transformed.z());
-    if (level.tree.nearestKSearch(query_point, 1, indices, distances) != 1) continue;
-    if (static_cast<double>(distances[0]) > max_squared) continue;
-    ++inliers;
-    proximity += 1.0 - std::sqrt(static_cast<double>(distances[0])) / max_distance;
+bool PriorMapRelocator::insideBounds(const Eigen::Vector3d& translation, double margin) const {
+  return translation.x() >= min_.x() - margin && translation.x() <= max_.x() + margin &&
+         translation.y() >= min_.y() - margin && translation.y() <= max_.y() + margin &&
+         translation.z() >= z_min_ - margin && translation.z() <= z_max_ + margin;
+}
+
+double PriorMapRelocator::inlierRatio(const PointCloudT& cloud,
+                                      const Eigen::Isometry3d& pose) const {
+  if (cloud.empty() || verify_index_.empty()) return 0.0;
+  const Eigen::Matrix3f rotation = pose.linear().cast<float>();
+  const Eigen::Vector3f translation = pose.translation().cast<float>();
+  size_t hits = 0;
+  for (const auto& point : cloud.points) {
+    const Eigen::Vector3f transformed = rotation * point.getVector3fMap() + translation;
+    if (verify_index_.occupied(transformed)) ++hits;
   }
-  const double count = static_cast<double>(query.size());
-  return 0.65 * static_cast<double>(inliers) / count + 0.35 * proximity / count;
+  return static_cast<double>(hits) / static_cast<double>(cloud.size());
 }
 
-bool PriorMapRelocator::insideSearchBounds(const Eigen::Isometry3d& pose) const {
-  const auto& t = pose.translation();
-  return t.x() >= map_min_.x() && t.x() <= map_max_.x() && t.y() >= map_min_.y() &&
-         t.y() <= map_max_.y() && t.z() >= params_.search_z_min &&
-         t.z() <= params_.search_z_max;
-}
-
-std::optional<PriorMapRelocator::VerifiedCandidate> PriorMapRelocator::verify(
-    const PointCloudT& cloud_body, const Candidate& candidate, std::string* rejection) const {
-  auto fail = [rejection](const std::string& reason) {
+std::optional<PriorMapRelocator::Verified> PriorMapRelocator::verify(
+    const PointCloudT& source, const ScoredPose& candidate, std::string* rejection) const {
+  auto fail = [rejection](const std::string& reason) -> std::optional<Verified> {
     if (rejection) *rejection = reason;
-    return std::nullopt;
+    return std::optional<Verified>();
   };
-  PointCloudPtr source = downsample(cloud_body, params_.gicp_voxel, params_.gicp_max_points);
-  if (params_.filter_ground && source->size() >= 50) {
-    pcl::SACSegmentation<PointT> segmentation;
-    pcl::PointIndices::Ptr inliers(new pcl::PointIndices());
-    pcl::ModelCoefficients::Ptr coefficients(new pcl::ModelCoefficients());
-    segmentation.setOptimizeCoefficients(true);
-    segmentation.setModelType(pcl::SACMODEL_PERPENDICULAR_PLANE);
-    segmentation.setMethodType(pcl::SAC_RANSAC);
-    segmentation.setAxis(Eigen::Vector3f::UnitZ());
-    segmentation.setEpsAngle(10.0 * kPi / 180.0);
-    segmentation.setMaxIterations(100);
-    segmentation.setDistanceThreshold(params_.ground_distance_threshold);
-    segmentation.setInputCloud(source);
-    segmentation.segment(*inliers, *coefficients);
-    if (inliers->indices.size() >= 20) {
-      pcl::ExtractIndices<PointT> extract;
-      PointCloudPtr without_ground(new PointCloudT());
-      extract.setInputCloud(source);
-      extract.setIndices(inliers);
-      extract.setNegative(true);
-      extract.filter(*without_ground);
-      if (without_ground->size() >= 20) source = without_ground;
-    }
+  if (source.size() < 20 || !verify_target_ || verify_target_->size() < 20) {
+    return fail("too few gicp points");
   }
-  const PointCloudPtr& target = levels_.back().cloud;
-  if (source->size() < 20 || target->size() < 20) return fail("too few GICP points");
 
   pcl::GeneralizedIterativeClosestPoint<PointT, PointT> gicp;
-  gicp.setInputSource(source);
-  gicp.setInputTarget(target);
+  gicp.setInputSource(PointCloudConstPtr(&source, [](const PointCloudT*) {}));
+  gicp.setInputTarget(verify_target_);
   gicp.setMaximumIterations(std::max(1, params_.gicp_iterations));
-  gicp.setMaxCorrespondenceDistance(params_.gicp_max_correspondence);
+  gicp.setMaxCorrespondenceDistance(std::max(0.1, params_.gicp_max_correspondence));
   PointCloudT aligned;
   gicp.align(aligned, candidate.pose.matrix().cast<float>());
-  if (!gicp.hasConverged() || aligned.empty()) return fail("GICP did not converge");
+  if (!gicp.hasConverged() || aligned.empty()) return fail("gicp did not converge");
 
-  VerifiedCandidate verified;
+  Verified verified;
   verified.pose.matrix() = gicp.getFinalTransformation().cast<double>();
-  verified.fitness = gicp.getFitnessScore(params_.validation_correspondence);
-  if (!verified.pose.matrix().allFinite() || !std::isfinite(verified.fitness) ||
-      verified.fitness > params_.max_fitness) {
-    return fail("fitness threshold: " + std::to_string(verified.fitness));
-  }
-  const Eigen::Isometry3d correction = verified.pose * candidate.pose.inverse();
-  if (correction.translation().norm() > params_.max_refinement_trans ||
-      Eigen::AngleAxisd(correction.linear()).angle() * 180.0 / kPi >
-          params_.max_refinement_rot_deg) {
-    return fail("refinement threshold");
-  }
-  const auto& rotation = verified.pose.linear();
-  const double roll = std::atan2(rotation(2, 1), rotation(2, 2));
-  const double pitch = std::atan2(-rotation(2, 0),
-                                  std::hypot(rotation(2, 1), rotation(2, 2)));
-  if (std::max(std::abs(roll), std::abs(pitch)) * 180.0 / kPi >
-      params_.max_roll_pitch_deg) {
+  if (!verified.pose.matrix().allFinite()) return fail("non finite transform");
+
+  verified.fitness = gicp.getFitnessScore(std::max(0.05, params_.validation_correspondence));
+  if (!std::isfinite(verified.fitness) || verified.fitness > params_.max_fitness) {
     std::ostringstream reason;
-    reason << "gravity threshold roll=" << roll * 180.0 / kPi
-           << " pitch=" << pitch * 180.0 / kPi << " fitness=" << verified.fitness;
+    reason << "fitness " << verified.fitness;
     return fail(reason.str());
   }
-  verified.inlier_ratio = inlierRatio(*source, *target, verified.pose,
-                                      params_.validation_correspondence);
+
+  const Eigen::Isometry3d delta = verified.pose * candidate.pose.inverse();
+  if (delta.translation().norm() > params_.max_refinement_trans) {
+    return fail("refinement translation " + std::to_string(delta.translation().norm()));
+  }
+  const double delta_rot = Eigen::AngleAxisd(delta.linear()).angle() * 180.0 / kPi;
+  if (delta_rot > params_.max_refinement_rot_deg) {
+    return fail("refinement rotation " + std::to_string(delta_rot));
+  }
+  if (params_.tilt_mode != TiltMode::Free) {
+    const double tilt_change =
+        std::abs(tiltFromUp(verified.pose.linear()) - tiltFromUp(candidate.pose.linear()));
+    if (tilt_change > params_.max_tilt_change_deg) {
+      std::ostringstream reason;
+      reason << "tilt change " << tilt_change;
+      return fail(reason.str());
+    }
+  }
+
+  verified.inlier_ratio = inlierRatio(source, verified.pose);
   if (verified.inlier_ratio < params_.min_inlier_ratio) {
-    return fail("inlier threshold: " + std::to_string(verified.inlier_ratio));
+    return fail("inlier ratio " + std::to_string(verified.inlier_ratio));
   }
   return verified;
 }
 
-double PriorMapRelocator::inlierRatio(const PointCloudT& source, const PointCloudT& target,
-                                      const Eigen::Isometry3d& pose,
-                                      double max_distance) const {
-  if (source.empty()) return 0.0;
-  PointCloudT transformed;
-  pcl::transformPointCloud(source, transformed, pose.matrix().cast<float>());
-  pcl::KdTreeFLANN<PointT> tree;
-  PointCloudConstPtr target_ptr(new PointCloudT(target));
-  tree.setInputCloud(target_ptr);
-  const double max_squared = max_distance * max_distance;
-  size_t inliers = 0;
-  std::vector<int> indices(1);
-  std::vector<float> distances(1);
-  for (const auto& point : transformed.points) {
-    if (tree.nearestKSearch(point, 1, indices, distances) == 1 &&
-        static_cast<double>(distances[0]) <= max_squared) {
-      ++inliers;
-    }
-  }
-  return static_cast<double>(inliers) / static_cast<double>(source.size());
-}
-
 std::optional<RelocalizationResult> PriorMapRelocator::localize(
-    const PointCloudT& cloud_body, std::string* rejection) const {
-  auto fail = [rejection](const std::string& reason) {
+    const PointCloudT& cloud_body, const Eigen::Isometry3d& odom_pose,
+    std::string* rejection) const {
+  auto fail = [rejection](const std::string& reason) -> std::optional<RelocalizationResult> {
     if (rejection) *rejection = reason;
-    return std::nullopt;
+    return std::optional<RelocalizationResult>();
   };
   if (!ready() || cloud_body.size() < 20) return fail("invalid map or query");
-  PointCloudPtr coarse_query =
-      downsample(cloud_body, levels_.front().voxel, params_.max_query_points);
-  if (coarse_query->size() < 20) return fail("too few coarse query points");
-  std::vector<Candidate> candidates = globalSearch(levels_.front(), *coarse_query);
-  if (candidates.empty()) return fail("no global candidates");
 
-  double parent_xy_step = params_.coarse_xy_step;
-  double parent_z_step = params_.coarse_z_step;
-  double parent_yaw_step = params_.coarse_yaw_step_deg * kPi / 180.0;
-  for (size_t index = 1; index < levels_.size(); ++index) {
-    const double xy_step = parent_xy_step * 0.5;
-    const double z_step = parent_z_step * 0.5;
-    const double yaw_step = parent_yaw_step * 0.5;
-    PointCloudPtr query = downsample(cloud_body, levels_[index].voxel,
-                                     params_.max_query_points * 2);
-    candidates = refine(levels_[index], *query, candidates, xy_step, z_step, yaw_step);
-    if (candidates.empty()) return fail("no refined candidates");
-    parent_xy_step = xy_step;
-    parent_z_step = z_step;
-    parent_yaw_step = yaw_step;
+  const auto search_start = std::chrono::steady_clock::now();
+  const std::vector<Eigen::Matrix3d> tilts = buildTilts(odom_pose);
+
+  const double finest = levels_.back().index.resolution();
+  PointCloudPtr fine = downsample(cloud_body, finest, 0);
+  if (fine->size() < 20) return fail("too few query points");
+
+  PointCloudPtr query = downsample(*fine, levels_.front().index.resolution(),
+                                   std::max(20, params_.coarse_query_points));
+  if (query->size() < 20) return fail("too few coarse query points");
+
+  PointCloudPtr source = downsample(*fine, params_.gicp_voxel, params_.gicp_max_points);
+  if (source->size() < 20) return fail("too few match points");
+
+  std::vector<ScoredPose> poses = searchGlobal(*query, tilts);
+  if (poses.empty()) return fail("no candidate above score threshold");
+  for (size_t level = 1; level < levels_.size(); ++level) {
+    PointCloudPtr level_query = downsample(*fine, levels_[level].index.resolution(),
+                                           std::max(20, params_.max_query_points));
+    if (level_query->size() < 20) level_query = query;
+    poses = expandLevel(level, *level_query, poses);
+    poses = prune(std::move(poses), keepFor(level));
+    if (poses.empty()) return fail("no refined candidate at level " + std::to_string(level));
   }
+  const double search_ms = std::chrono::duration<double, std::milli>(
+                               std::chrono::steady_clock::now() - search_start)
+                               .count();
 
-  std::vector<VerifiedCandidate> verified;
-  std::ostringstream failures;
-  for (const auto& candidate : candidates) {
-    std::string candidate_rejection;
-    auto result = verify(cloud_body, candidate, &candidate_rejection);
-    if (result) {
-      verified.push_back(std::move(*result));
-    } else {
-      const auto& t = candidate.pose.translation();
-      const double yaw = std::atan2(candidate.pose.linear()(1, 0), candidate.pose.linear()(0, 0));
-      failures << "[" << t.x() << "," << t.y() << "," << t.z() << "," << yaw
-               << ";" << candidate.score << ";" << candidate_rejection << "]";
+  const std::vector<ScoredPose> candidates = selectDistinct(poses, params_.gicp_candidates);
+  if (candidates.empty()) return fail("no distinct candidate");
+  if (params_.min_score_margin > 0.0 && candidates.size() > 1) {
+    const double best = candidates.front().score;
+    const double margin =
+        best > 1.0e-6 ? (best - candidates[1].score) / best : 0.0;
+    if (margin < params_.min_score_margin) {
+      return fail("ambiguous search margin " + std::to_string(margin));
     }
   }
-  if (verified.empty()) return fail(failures.str());
-  std::sort(verified.begin(), verified.end(),
-            [](const VerifiedCandidate& lhs, const VerifiedCandidate& rhs) {
-              return lhs.fitness < rhs.fitness;
-            });
+
+  const auto verify_start = std::chrono::steady_clock::now();
+  std::vector<std::optional<Verified>> verified(candidates.size());
+  std::vector<std::string> reasons(candidates.size());
+#pragma omp parallel for schedule(dynamic, 1)
+  for (long long i = 0; i < static_cast<long long>(candidates.size()); ++i) {
+    verified[static_cast<size_t>(i)] =
+        verify(*source, candidates[static_cast<size_t>(i)], &reasons[static_cast<size_t>(i)]);
+  }
+  const double verify_ms = std::chrono::duration<double, std::milli>(
+                               std::chrono::steady_clock::now() - verify_start)
+                               .count();
+
+  std::vector<Verified> accepted;
+  std::ostringstream failures;
+  for (size_t i = 0; i < candidates.size(); ++i) {
+    if (verified[i]) {
+      accepted.push_back(*verified[i]);
+    } else {
+      const auto& t = candidates[i].pose.translation();
+      failures << "[" << t.x() << "," << t.y() << "," << t.z() << ";" << candidates[i].score
+               << ";" << reasons[i] << "]";
+    }
+  }
+  if (accepted.empty()) return fail(failures.str());
+
+  std::sort(accepted.begin(), accepted.end(), [](const Verified& lhs, const Verified& rhs) {
+    return lhs.fitness < rhs.fitness;
+  });
 
   double ambiguity_margin = std::numeric_limits<double>::infinity();
-  for (size_t index = 1; index < verified.size(); ++index) {
-    const double translation =
-        (verified[index].pose.translation() - verified[0].pose.translation()).norm();
-    const double rotation = rotationDistance(verified[index].pose.linear(),
-                                             verified[0].pose.linear()) *
-                            180.0 / kPi;
+  for (size_t i = 1; i < accepted.size(); ++i) {
+    const double translation = (accepted[i].pose.translation() -
+                                accepted[0].pose.translation()).norm();
+    const double rotation = rotationDistanceDeg(accepted[i].pose.linear(),
+                                                accepted[0].pose.linear());
     if (translation >= params_.ambiguity_translation ||
         rotation >= params_.ambiguity_rotation_deg) {
-      ambiguity_margin = verified[index].fitness - verified[0].fitness;
+      ambiguity_margin = accepted[i].fitness - accepted[0].fitness;
       break;
     }
   }
@@ -411,11 +630,16 @@ std::optional<RelocalizationResult> PriorMapRelocator::localize(
   }
 
   RelocalizationResult result;
-  result.T_map_body = verified[0].pose;
-  result.fitness = verified[0].fitness;
-  result.inlier_ratio = verified[0].inlier_ratio;
+  result.T_map_body = accepted.front().pose;
+  result.fitness = accepted.front().fitness;
+  result.inlier_ratio = accepted.front().inlier_ratio;
   result.ambiguity_margin = ambiguity_margin;
-  result.candidate_count = static_cast<int>(verified.size());
+  result.score = candidates.front().score;
+  result.search_ms = search_ms;
+  result.verify_ms = verify_ms;
+  result.candidate_count = static_cast<int>(candidates.size());
+  result.verified_count = static_cast<int>(accepted.size());
+  result.tilt_count = static_cast<int>(tilts.size());
   return result;
 }
 

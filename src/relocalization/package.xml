@@ -3,7 +3,7 @@
 <package format="3">
   <name>relocalization</name>
   <version>0.1.0</version>
-  <description>Prior map relocalization with a voxel pyramid, 4-DOF search and GICP verification</description>
+  <description>Prior map relocalization with a voxel hash pyramid, automatic z range and GICP verification</description>
   <maintainer email="xiaozhuABCD1234@163.com">xiaozhu</maintainer>
   <license>MIT</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
@@ -17,6 +17,7 @@
   <depend>tf2_eigen</depend>
   <depend>eigen</depend>
   <depend>libpcl-all-dev</depend>
+  <test_depend>ament_cmake_gtest</test_depend>
   <export>
     <build_type>ament_cmake</build_type>
   </export>
