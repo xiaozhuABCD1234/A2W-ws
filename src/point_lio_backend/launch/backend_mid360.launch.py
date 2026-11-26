@@ -1,10 +1,10 @@
 """Point-LIO 后端（回环 + 位姿图）单独启动。
 
-一般不用直接跑：mid360.launch.py 里 backend:=true 会自动 include 本文件。
+一般不用直接跑：slam.launch.py 里 backend:=true 会自动 include 本文件。
 单独调试：
 
-    ros2 launch point_lio_backend backend_mid360.launch.py
-    ros2 launch point_lio_backend backend_mid360.launch.py params_file:=/path/to/x.yaml
+    ros2 launch point_lio_backend backend_slam.launch.py
+    ros2 launch point_lio_backend backend_slam.launch.py params_file:=/path/to/x.yaml
 """
 
 import os

@@ -1,9 +1,9 @@
 """Mid-360 (+D435i) 数据录制。
 
-    ros2 launch bringup record_mid360.launch.py
-    ros2 launch bringup record_mid360.launch.py camera:=false          # 只录雷达
-    ros2 launch bringup record_mid360.launch.py out:=bags/my_bag       # 自定义输出名
-    ros2 launch bringup record_mid360.launch.py camera_wait:=20.0      # 相机初始化等待
+    ros2 launch bringup record.launch.py
+    ros2 launch bringup record.launch.py camera:=false          # 只录雷达
+    ros2 launch bringup record.launch.py out:=bags/my_bag       # 自定义输出名
+    ros2 launch bringup record.launch.py camera_wait:=20.0      # 相机初始化等待
 
 行为:
 - lsusb 检测到 D435i(或显式 camera:=true)时,先起相机节点

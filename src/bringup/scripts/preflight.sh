@@ -56,16 +56,16 @@ PIO_CFG=""; PIO_LAUNCH=""; DRV_CFG=""; DRV_LAUNCH=""; OCM_CFG=""; OCM_LAUNCH="";
 if [ -n "$WS" ]; then
   PIO_CFG="$(pick "$WS/src/point_lio_ros2/config/mid360.yaml" \
                   "$WS/install/point_lio/share/point_lio/config/mid360.yaml")" || true
-  PIO_LAUNCH="$(pick "$WS/src/point_lio_ros2/launch/mapping_mid360.launch.py" \
-                     "$WS/install/point_lio/share/point_lio/launch/mapping_mid360.launch.py")" || true
+  PIO_LAUNCH="$(pick "$WS/src/point_lio_ros2/launch/mapping_slam.launch.py" \
+                     "$WS/install/point_lio/share/point_lio/launch/mapping_slam.launch.py")" || true
   DRV_CFG="$(pick "$WS/src/mid360_driver/config/param.yaml" \
                   "$WS/install/mid360_driver/share/mid360_driver/config/param.yaml")" || true
   DRV_LAUNCH="$(pick "$WS/src/mid360_driver/launch/mid360_driver.launch.py" \
                      "$WS/install/mid360_driver/share/mid360_driver/launch/mid360_driver.launch.py")" || true
-  OCM_CFG="$(pick "$WS/src/bringup/config/octomap_mid360.yaml" \
-                  "$WS/install/bringup/share/bringup/config/octomap_mid360.yaml")" || true
-  OCM_LAUNCH="$(pick "$WS/src/bringup/launch/octomap_mid360.launch.py" \
-                    "$WS/install/bringup/share/bringup/launch/octomap_mid360.launch.py")" || true
+  OCM_CFG="$(pick "$WS/src/bringup/config/octomap.yaml" \
+                  "$WS/install/bringup/share/bringup/config/octomap.yaml")" || true
+  OCM_LAUNCH="$(pick "$WS/src/bringup/launch/octomap.launch.py" \
+                    "$WS/install/bringup/share/bringup/launch/octomap.launch.py")" || true
   PREPROC="$(pick "$WS/src/point_lio_ros2/src/preprocess.cpp")" || true
 fi
 
@@ -206,7 +206,7 @@ dup="$(grep -nE "default_value=['\"][0-9]" "$OCM_LAUNCH" 2>/dev/null | grep -E "
 if [ -n "$dup" ]; then
   warn "octomap launch 里又出现数字默认值(会盖掉 yaml):"
   printf '        %s\n' "$dup"
-  info "resolution/max_range 的唯一真相应是 config/octomap_mid360.yaml;"
+  info "resolution/max_range 的唯一真相应是 config/octomap.yaml;"
   info "launch 侧应保持 default_value=''(留空=用 yaml)。"
 else
   pass "octomap 参数单一真相源(yaml),launch 不再覆盖"
@@ -228,11 +228,11 @@ if [ -n "$WS" ]; then
   for pair in \
     "$WS/src/mid360_driver/config/param.yaml:$WS/install/mid360_driver/share/mid360_driver/config/param.yaml" \
     "$WS/src/mid360_driver/launch/mid360_driver.launch.py:$WS/install/mid360_driver/share/mid360_driver/launch/mid360_driver.launch.py" \
-    "$WS/src/bringup/config/octomap_mid360.yaml:$WS/install/bringup/share/bringup/config/octomap_mid360.yaml" \
-    "$WS/src/bringup/launch/octomap_mid360.launch.py:$WS/install/bringup/share/bringup/launch/octomap_mid360.launch.py" \
-    "$WS/src/bringup/launch/mid360.launch.py:$WS/install/bringup/share/bringup/launch/mid360.launch.py" \
+    "$WS/src/bringup/config/octomap.yaml:$WS/install/bringup/share/bringup/config/octomap.yaml" \
+    "$WS/src/bringup/launch/octomap.launch.py:$WS/install/bringup/share/bringup/launch/octomap.launch.py" \
+    "$WS/src/bringup/launch/slam.launch.py:$WS/install/bringup/share/bringup/launch/slam.launch.py" \
     "$WS/src/point_lio_backend/config/backend_mid360.yaml:$WS/install/point_lio_backend/share/point_lio_backend/config/backend_mid360.yaml" \
-    "$WS/src/point_lio_backend/launch/backend_mid360.launch.py:$WS/install/point_lio_backend/share/point_lio_backend/launch/backend_mid360.launch.py" \
+    "$WS/src/point_lio_backend/launch/backend_slam.launch.py:$WS/install/point_lio_backend/share/point_lio_backend/launch/backend_slam.launch.py" \
     "$WS/src/point_lio_ros2/config/mid360.yaml:$WS/install/point_lio/share/point_lio/config/mid360.yaml" ; do
     a="${pair%%:*}"; b="${pair##*:}"
     if [ -f "$a" ] && [ -f "$b" ] && ! cmp -s "$a" "$b"; then
@@ -291,7 +291,7 @@ if [ -n "$PIO_LAUNCH" ]; then
     fi
   fi
 else
-  pass "未找到 point_lio 的 mapping_mid360.launch.py,跳过"
+  pass "未找到 point_lio 的 mapping_slam.launch.py,跳过"
 fi
 
 # ── C7 后端回环/位姿图(point_lio_backend) ────────────────────────────────
@@ -317,12 +317,12 @@ else
     fi
   done
 fi
-if [ -n "$WS" ] && [ -f "$WS/src/bringup/launch/mid360.launch.py" ]; then
-  ML="$WS/src/bringup/launch/mid360.launch.py"
+if [ -n "$WS" ] && [ -f "$WS/src/bringup/launch/slam.launch.py" ]; then
+  ML="$WS/src/bringup/launch/slam.launch.py"
   if grep -q "get_package_prefix('point_lio_backend')" "$ML" && grep -q "'frame_id': 'map'" "$ML"; then
     pass "一键 launch 已 include 后端,并在 backend=true 时把 octomap 切到 map 系"
   else
-    fail "mid360.launch.py 缺少 point_lio_backend include 或 frame_id=map"
+    fail "slam.launch.py 缺少 point_lio_backend include 或 frame_id=map"
     info "backend=true 时 octomap 必须用 map 系,否则纠偏 TF 不会被 octomap 看到。"
   fi
 fi

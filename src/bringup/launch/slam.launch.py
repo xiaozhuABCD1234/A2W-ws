@@ -1,10 +1,10 @@
 """Mid-360 全栈一键启动:驱动 + point_lio + octomap + rviz(单窗口)。
 
-    ros2 launch bringup mid360.launch.py
-    ros2 launch bringup mid360.launch.py show_rviz:=false
-    ros2 launch bringup mid360.launch.py pcd_save:=true      # 临时开 PCD 落盘(先验地图)
-    ros2 launch bringup mid360.launch.py backend:=false      # 关后端,octomap 退回 camera_init 系
-    ros2 launch bringup mid360.launch.py use_driver:=false use_sim_time:=true
+    ros2 launch bringup slam.launch.py
+    ros2 launch bringup slam.launch.py show_rviz:=false
+    ros2 launch bringup slam.launch.py pcd_save:=true      # 临时开 PCD 落盘(先验地图)
+    ros2 launch bringup slam.launch.py backend:=false      # 关后端,octomap 退回 camera_init 系
+    ros2 launch bringup slam.launch.py use_driver:=false use_sim_time:=true
 
 point_lio 的 rviz 固定关掉,rviz 由本 launch 直接起。驱动为本地包
 mid360_driver:UDP 收流直接发 /livox/lidar(PointCloud2)与 /livox/imu,
@@ -13,7 +13,7 @@ mid360_driver:UDP 收流直接发 /livox/lidar(PointCloud2)与 /livox/imu,
 ⚠️ 参数名用 show_rviz 而非 rviz:include 会把参数写进共享的
 launch_configurations,传 'rviz' 会把父级自己的 'rviz' 也改成 false,
 导致引用它的节点条件全变假。改名后互不干扰。调参(resolution 等)
-在 octomap_mid360.launch.py 层做,本 launch 不转发。
+在 octomap.launch.py 层做,本 launch 不转发。
 
 启动前先跑 preflight.sh 静态自检(驱动与 point_lio 的
 lidar_type/timestamp_unit/话题名/host_ip/octomap 输入/src 是否 build)。
@@ -170,7 +170,7 @@ def generate_launch_description():
     point_lio = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([
             FindPackageShare('point_lio'),
-            'launch', 'mapping_mid360.launch.py',
+            'launch', 'mapping_slam.launch.py',
         ])),
         launch_arguments={
             'rviz': 'false',
@@ -242,7 +242,7 @@ def generate_launch_description():
         return [IncludeLaunchDescription(
             PythonLaunchDescriptionSource(PathJoinSubstitution([
                 FindPackageShare('point_lio_backend'),
-                'launch', 'backend_mid360.launch.py',
+                'launch', 'backend_slam.launch.py',
             ])),
             launch_arguments={
                 'use_sim_time': LaunchConfiguration('use_sim_time'),
@@ -271,7 +271,7 @@ def generate_launch_description():
             actions.append(IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(PathJoinSubstitution([
                     FindPackageShare('bringup'),
-                    'launch', 'octomap_mid360.launch.py',
+                    'launch', 'octomap.launch.py',
                 ])),
                 launch_arguments={
                     'frame_id': 'map' if use_backend else '',
@@ -301,7 +301,7 @@ def generate_launch_description():
             from launch_ros.substitutions import FindPackageShare as _FPS
             template = PathJoinSubstitution([
                 _FPS('bringup'), 'rviz',
-                'backend_map.rviz' if use_backend else 'octomap_mid360.rviz',
+                'backend_map.rviz' if use_backend else 'octomap.rviz',
             ]).perform(context)
             rviz_cfg = _prepare_rviz_config(
                 template,

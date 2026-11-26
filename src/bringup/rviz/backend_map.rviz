@@ -61,7 +61,7 @@ Visualization Manager:
     #     Name: cloud_registered
     #     Enabled: true
     #     Topic: {Value: /cloud_registered}
-    # 或者直接把 Fixed Frame 改成 camera_init 再用旧配置 octomap_mid360.rviz。
+    # 或者直接把 Fixed Frame 改成 camera_init 再用旧配置 octomap.rviz。
 
     # octomap(map 系,后端启用时)
     - Class: octomap_rviz_plugins/OccupancyGrid
