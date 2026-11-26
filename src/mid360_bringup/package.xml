@@ -27,6 +27,7 @@
   <exec_depend>point_lio</exec_depend>
   <exec_depend>point_lio_backend</exec_depend>
   <exec_depend>relocalization</exec_depend>
+  <exec_depend>ground_segmentation</exec_depend>
   <exec_depend>mid360_driver</exec_depend>
   <exec_depend>pcl_ros</exec_depend>
   <exec_depend>octomap_server</exec_depend>
