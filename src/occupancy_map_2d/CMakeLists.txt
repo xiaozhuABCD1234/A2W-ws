@@ -56,6 +56,13 @@ install(TARGETS occupancy_map_2d_core occupancy_map_2d_node
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config launch DESTINATION share/${PROJECT_NAME})
 
+if(BUILD_TESTING)
+  find_package(ament_cmake_gtest REQUIRED)
+  ament_add_gtest(test_grid test/test_grid.cpp)
+  target_link_libraries(test_grid occupancy_map_2d_core)
+  ament_target_dependencies(test_grid rclcpp nav_msgs)
+endif()
+
 ament_export_targets(occupancy_map_2d_targets HAS_LIBRARY_TARGET)
 ament_export_dependencies(rclcpp nav_msgs Eigen3 PCL OpenCV)
 ament_package()

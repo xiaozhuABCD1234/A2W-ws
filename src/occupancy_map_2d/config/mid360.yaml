@@ -6,7 +6,7 @@
     map_topic: /occupancy_map_2d/map
     runtime.stamp_tolerance: 0.05
     runtime.publish_period_ms: 1000
-    runtime.tf_timeout_ms: 50
+    runtime.tf_timeout_ms: 100
     runtime.log_period_ms: 5000
     grid.resolution: 0.10
     grid.width: 120.0
@@ -22,3 +22,4 @@
     grid.max_log_odds: 5.0
     grid.occupied_probability: 0.65
     grid.min_component_cells: 3
+    grid.raycast_dedupe_deg: 0.5

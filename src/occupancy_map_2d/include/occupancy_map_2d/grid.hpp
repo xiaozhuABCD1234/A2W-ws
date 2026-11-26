@@ -31,6 +31,20 @@ struct GridParams {
   double max_log_odds = 5.0;
   double occupied_probability = 0.65;
   int min_component_cells = 3;
+
+  double raycast_dedupe_deg = 0.5;
+};
+
+struct GridSnapshot {
+  double resolution = 0.1;
+  double origin_x = 0.0;
+  double origin_y = 0.0;
+  double occupied_probability = 0.65;
+  int min_component_cells = 3;
+  int width = 0;
+  int height = 0;
+  std::vector<int32_t> cells;
+  std::vector<float> log_odds;
 };
 
 class OccupancyGrid2D {
@@ -40,10 +54,20 @@ class OccupancyGrid2D {
   void clear();
   void update(const PointCloudT& ground, const PointCloudT& obstacles,
               const Eigen::Isometry3d& sensor_to_map);
+
+  void takeSnapshot(GridSnapshot* snapshot) const;
+
+  static nav_msgs::msg::OccupancyGrid toMessage(const GridSnapshot& snapshot,
+                                                const std::string& frame_id,
+                                                const rclcpp::Time& stamp);
+
   nav_msgs::msg::OccupancyGrid message(const std::string& frame_id,
                                        const rclcpp::Time& stamp) const;
-  size_t updatedCells() const { return updated_cells_; }
-  size_t occupiedCells() const;
+
+  size_t updatedCells() const { return observed_cells_.size(); }
+  size_t occupiedCells() const { return occupied_cells_; }
+
+  uint64_t version() const { return version_; }
 
   int width() const { return width_; }
   int height() const { return height_; }
@@ -52,21 +76,37 @@ class OccupancyGrid2D {
  private:
   bool index(double x, double y, int* cell_x, int* cell_y) const;
   void raycast(int start_x, int start_y, int end_x, int end_y, bool clear_endpoint,
-               const std::vector<uint8_t>* blocked, float occupied_threshold);
+               const std::vector<uint8_t>* blocked);
   void addFree(int x, int y);
   void addOccupied(int x, int y);
-  double probability(int index) const;
+  const std::vector<int>& dedupeGroundRays(int sensor_x, int sensor_y);
 
   GridParams params_;
   int width_ = 0;
   int height_ = 0;
+  float occupied_threshold_ = 0.0f;
+  float free_delta_ = 0.0f;
+  float occupied_delta_ = 0.0f;
+  float min_log_odds_ = 0.0f;
+  float max_log_odds_ = 0.0f;
+  double max_range2_ = 0.0;
+
   std::vector<float> log_odds_;
   std::vector<uint8_t> observed_;
   std::vector<uint8_t> ground_mask_;
   std::vector<uint8_t> obstacle_mask_;
+
+  std::vector<int> observed_cells_;
   std::vector<int> ground_touched_;
   std::vector<int> obstacle_touched_;
-  size_t updated_cells_ = 0;
+  std::vector<int> ground_cells_;
+  std::vector<int> obstacle_cells_;
+  std::vector<int> ground_ray_cells_;
+  std::vector<int32_t> bucket_dist2_;
+  std::vector<int32_t> bucket_cell_;
+
+  size_t occupied_cells_ = 0;
+  uint64_t version_ = 0;
 };
 
 }
