@@ -22,6 +22,7 @@ from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -30,6 +31,11 @@ OVERRIDABLE = {
     'resolution': ('resolution', float),
     'max_range': ('sensor_model.max_range', float),
 }
+
+
+def _is_on(context, name):
+    return context.perform_substitution(
+        LaunchConfiguration(name)).strip().lower() in ('1', 'true', 'yes', 'on')
 
 
 def _octomap_node(context):
@@ -43,7 +49,7 @@ def _octomap_node(context):
         FindPackageShare('mid360_bringup'), 'config', 'octomap_mid360.yaml'
     ]).perform(context)]
 
-    override = {}
+    override = {'use_sim_time': _is_on(context, 'use_sim_time')}
     # frame_id 默认空 = 用 yaml 的 camera_init；backend 开启时由上层 launch 传 map。
     frame_override = context.perform_substitution(LaunchConfiguration('frame_id')).strip()
     if frame_override:
@@ -93,6 +99,9 @@ def generate_launch_description():
         description='世界系。留空 = 用 config/octomap_mid360.yaml 的 camera_init;'
                     '后端启用时上层传 map(map->camera_init 由 point_lio_backend 发布)')
 
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time', default_value='false')
+
     rviz_config_arg = DeclareLaunchArgument(
         'rviz_config', default_value=PathJoinSubstitution([
             FindPackageShare('mid360_bringup'), 'rviz', 'octomap_mid360.rviz'
@@ -105,6 +114,8 @@ def generate_launch_description():
         name='rviz2',
         output='screen',
         arguments=['-d', LaunchConfiguration('rviz_config')],
+        parameters=[{'use_sim_time': ParameterValue(
+            LaunchConfiguration('use_sim_time'), value_type=bool)}],
         # octomap_rviz_plugins 2.1.0 的 .so 没把 liboctomap 写进 DT_NEEDED,
         # rviz2 自己又不加载 octomap → dlopen 报 undefined symbol OcTreeStamped;
         # 预加载 liboctomap.so.1.9.7 解决(只注入 rviz2)。
@@ -120,6 +131,7 @@ def generate_launch_description():
         max_range_arg,
         frame_id_arg,
         rviz_config_arg,
+        use_sim_time_arg,
         OpaqueFunction(function=_octomap_node),
         rviz_node,
     ])

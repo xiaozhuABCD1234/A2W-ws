@@ -5,6 +5,7 @@ from launch.actions import DeclareLaunchArgument, GroupAction, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -62,6 +63,10 @@ def _laser_mapping_node(context):
         laser_mapping_params.append(
             {'pcd_save': {'pcd_save_en': raw in ('true', '1', 'yes', 'on')}})
 
+    sim = context.perform_substitution(
+        LaunchConfiguration('use_sim_time')).strip().lower()
+    laser_mapping_params.append({'use_sim_time': sim in ('true', '1', 'yes', 'on')})
+
     # LOCAL PATCH P11:清理 LD_LIBRARY_PATH(见 _clean_ld_library_path)
     extra_env = _clean_ld_library_path()
 
@@ -98,14 +103,20 @@ def generate_launch_description():
             FindPackageShare('point_lio'),
             'rviz_cfg', 'loam_livox.rviz'
         ])],
+        parameters=[{'use_sim_time': ParameterValue(
+            LaunchConfiguration('use_sim_time'), value_type=bool)}],
         condition=IfCondition(LaunchConfiguration('rviz')),
         prefix='nice'
     )
+
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time', default_value='false')
 
     # Assemble the launch description
     ld = LaunchDescription([
         rviz_arg,
         pcd_save_arg,
+        use_sim_time_arg,
         OpaqueFunction(function=_laser_mapping_node),
         GroupAction(
             actions=[rviz_node],

@@ -4,6 +4,7 @@
     ros2 launch mid360_bringup mid360.launch.py show_rviz:=false
     ros2 launch mid360_bringup mid360.launch.py pcd_save:=true      # 临时开 PCD 落盘(先验地图)
     ros2 launch mid360_bringup mid360.launch.py backend:=false      # 关后端,octomap 退回 camera_init 系
+    ros2 launch mid360_bringup mid360.launch.py use_driver:=false use_sim_time:=true
 
 point_lio 的 rviz 固定关掉,rviz 由本 launch 直接起。驱动为本地包
 mid360_driver:UDP 收流直接发 /livox/lidar(PointCloud2)与 /livox/imu,
@@ -31,6 +32,7 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -137,11 +139,21 @@ def generate_launch_description():
         description='是否启动 point_lio_backend(回环检测 + 位姿图)。true 时 octomap 与 rviz '
                     '切到 map 系;false 时退回改造前行为(camera_init 系)')
 
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time', default_value='false')
+
+    use_driver_arg = DeclareLaunchArgument(
+        'use_driver', default_value='true')
+
     driver = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([
             FindPackageShare('mid360_driver'),
             'launch', 'mid360_driver.launch.py',
-        ]))
+        ])),
+        launch_arguments={
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+        }.items(),
+        condition=IfCondition(LaunchConfiguration('use_driver')),
     )
 
     point_lio = IncludeLaunchDescription(
@@ -153,6 +165,7 @@ def generate_launch_description():
             'rviz': 'false',
             # P7:透传给 point_lio 的 mapping launch;空串 = 不覆盖 yaml
             'pcd_save': LaunchConfiguration('pcd_save'),
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
         }.items(),
     )
 
@@ -181,6 +194,9 @@ def generate_launch_description():
                 FindPackageShare('point_lio_backend'),
                 'launch', 'backend_mid360.launch.py',
             ])),
+            launch_arguments={
+                'use_sim_time': LaunchConfiguration('use_sim_time'),
+            }.items(),
         )]
 
     def _octomap_and_rviz(context):
@@ -206,7 +222,21 @@ def generate_launch_description():
                     FindPackageShare('mid360_bringup'),
                     'launch', 'octomap_mid360.launch.py',
                 ])),
-                launch_arguments={'frame_id': 'map' if use_backend else ''}.items(),
+                launch_arguments={
+                    'frame_id': 'map' if use_backend else '',
+                    'use_sim_time': LaunchConfiguration('use_sim_time'),
+                }.items(),
+            ))
+            actions.append(Node(
+                package='mid360_bringup',
+                executable='map_watchdog',
+                name='map_watchdog',
+                output='screen',
+                parameters=[{
+                    'out_dir': 'PCD',
+                    'use_sim_time': ParameterValue(
+                        LaunchConfiguration('use_sim_time'), value_type=bool),
+                }],
             ))
         elif want_octomap:
             print('[mid360] ⚠ 本机没有 octomap_server,已跳过 3D 占据栅格(其余链路照常)。'
@@ -235,6 +265,8 @@ def generate_launch_description():
                 name='rviz2',
                 output='screen',
                 arguments=['-d', rviz_cfg],
+                parameters=[{'use_sim_time': ParameterValue(
+                    LaunchConfiguration('use_sim_time'), value_type=bool)}],
                 additional_env={'LD_PRELOAD': '/usr/lib/x86_64-linux-gnu/liboctomap.so.1.9.7'},
             ))
         return actions
@@ -244,6 +276,8 @@ def generate_launch_description():
         pcd_save_arg,
         backend_arg,
         use_octomap_arg,
+        use_sim_time_arg,
+        use_driver_arg,
         driver,
         point_lio,
         OpaqueFunction(function=_backend_include),

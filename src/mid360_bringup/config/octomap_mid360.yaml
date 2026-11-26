@@ -38,11 +38,14 @@
       # 只把该高度带内的体素投影;不影响 3D octomap,治不了 3D 重影。
       occupancy_min_z: -2.0
       occupancy_max_z: 3.0
-      incremental_2D_projection: true
+      incremental_2D_projection: false
 
       # ── 其他 ─────────────────────────────────────────
       filter_ground_plane: false   # 地面当占据体素(2D 投影里正好当地板)
       filter_speckles: true        # 去孤立噪点体素
       compress_map: true           # /octomap_binary 无损压缩
       publish_free_space: false    # 空闲体素带宽开销大,默认关
-      latch: false                 # 实时建图,不给后加入的订阅者补发
+      # latch=true → /projected_map 用 transient_local：nav2 map_saver / costmap
+      # static layer 均为 transient_local 订阅，volatile 与之 QoS 不兼容收不到；
+      # 晚加入的订阅者(RViz Map 显示、occ-save 存图)也能拿到最近一版地图。
+      latch: true

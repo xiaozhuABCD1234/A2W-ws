@@ -14,6 +14,11 @@
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
+  <depend>rclcpp</depend>
+  <depend>nav_msgs</depend>
+  <depend>octomap</depend>
+  <depend>octomap_msgs</depend>
+
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>rviz2</exec_depend>
@@ -23,7 +28,6 @@
   <exec_depend>mid360_driver</exec_depend>
   <exec_depend>pcl_ros</exec_depend>
   <exec_depend>octomap_server</exec_depend>
-  <exec_depend>octomap_msgs</exec_depend>
   <exec_depend>octomap_rviz_plugins</exec_depend>
 
   <export>

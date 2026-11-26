@@ -28,6 +28,9 @@ src/point_lio_ros2/Log/imu_pbp.txt
 *.pcd
 # 俯视预览图(matplotlib 生成,运行时产物)
 PCD/*.png
+PCD/*.pgm
+PCD/*.yaml
+PCD/*.bt
 
 # ============================================================
 #  上游演示资源

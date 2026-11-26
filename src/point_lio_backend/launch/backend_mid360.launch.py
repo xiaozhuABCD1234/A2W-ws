@@ -13,6 +13,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -37,13 +38,20 @@ def generate_launch_description():
         ]),
         description='后端参数 yaml（唯一真相源）')
 
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time', default_value='false')
+
     backend_node = Node(
         package='point_lio_backend',
         executable='point_lio_backend_node',
         name='point_lio_backend',
         output='screen',
-        parameters=[LaunchConfiguration('params_file')],
+        parameters=[
+            LaunchConfiguration('params_file'),
+            {'use_sim_time': ParameterValue(
+                LaunchConfiguration('use_sim_time'), value_type=bool)},
+        ],
         additional_env=_clean_ld_library_path(),
     )
 
-    return LaunchDescription([params_arg, backend_node])
+    return LaunchDescription([params_arg, use_sim_time_arg, backend_node])
