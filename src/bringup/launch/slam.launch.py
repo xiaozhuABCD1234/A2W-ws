@@ -1,7 +1,7 @@
 """Mid-360 全栈一键启动:驱动 + point_lio + octomap + rviz(单窗口)。
 
     ros2 launch bringup slam.launch.py
-    ros2 launch bringup slam.launch.py show_rviz:=false
+    ros2 launch bringup slam.launch.py rviz:=false
     ros2 launch bringup slam.launch.py pcd_save:=true      # 临时开 PCD 落盘(先验地图)
     ros2 launch bringup slam.launch.py backend:=false      # 关后端,octomap 退回 camera_init 系
     ros2 launch bringup slam.launch.py use_driver:=false use_sim_time:=true
@@ -10,17 +10,15 @@ point_lio 的 rviz 固定关掉,rviz 由本 launch 直接起。驱动为本地�
 mid360_driver:UDP 收流直接发 /livox/lidar(PointCloud2)与 /livox/imu,
 没有 livox_ros_driver2 的 xfer_format 选项。
 
-⚠️ 参数名用 show_rviz 而非 rviz:include 会把参数写进共享的
-launch_configurations,传 'rviz' 会把父级自己的 'rviz' 也改成 false,
-导致引用它的节点条件全变假。改名后互不干扰。
-
 """
 
+import os
 import tempfile
 
 from ament_index_python.packages import get_package_prefix
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import (DeclareLaunchArgument, GroupAction, IncludeLaunchDescription,
+                            OpaqueFunction)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
@@ -81,10 +79,9 @@ def _prepare_rviz_config(template_path, fixed_frame, drop_octomap_plugin):
 
 
 def generate_launch_description():
-    show_rviz_arg = DeclareLaunchArgument(
-        'show_rviz', default_value='true',
-        description='启动 rviz2(单窗口:octomap 体素 + LIO 点云 + path)。'
-                    '不用 rviz:=true —— 见文件头注释,会被点_lio 的 include 污染')
+    rviz_arg = DeclareLaunchArgument(
+        'rviz', default_value='true',
+        description='启动 rviz2(单窗口:octomap 体素 + LIO 点云 + 2D 占据图 + path)')
 
     # P7:透传「是否落盘 PCD」给 point_lio。留空 = 用 yaml
     # (约定 A);显式传 true/false 才覆盖。launch 参数是唯一免 build 的开关。
@@ -135,18 +132,17 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('use_driver')),
     )
 
-    point_lio = IncludeLaunchDescription(
+    point_lio = GroupAction(scoped=True, actions=[IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([
             FindPackageShare('point_lio'),
             'launch', 'mapping_mid360.launch.py',
         ])),
         launch_arguments={
             'rviz': 'false',
-            # P7:透传给 point_lio 的 mapping launch;空串 = 不覆盖 yaml
             'pcd_save': LaunchConfiguration('pcd_save'),
             'use_sim_time': LaunchConfiguration('use_sim_time'),
         }.items(),
-    )
+    )])
 
     relocalization = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([
@@ -229,7 +225,7 @@ def generate_launch_description():
                 LaunchConfiguration(name)).strip().lower() in ('1', 'true', 'yes', 'on')
 
         use_backend = _is_on('backend')
-        show_rviz = _is_on('show_rviz')
+        want_rviz = _is_on('rviz')
         want_octomap = _is_on('use_octomap')
         has_octomap_server = _has_package('octomap_server')
         has_octomap_rviz = _has_package('octomap_rviz_plugins')
@@ -268,6 +264,7 @@ def generate_launch_description():
                 output='screen',
                 parameters=[{
                     'out_dir': 'PCD',
+                    'map2d_topic': '/occupancy_map_2d/map',
                     'use_sim_time': ParameterValue(
                         LaunchConfiguration('use_sim_time'), value_type=bool),
                 }],
@@ -276,11 +273,11 @@ def generate_launch_description():
             print('[mid360] ⚠ 本机没有 octomap_server,已跳过 3D 占据栅格(其余链路照常)。'
                   '\n[mid360]   需要的话: sudo apt install ros-jazzy-octomap-server '
                   'ros-jazzy-octomap-rviz-plugins', flush=True)
-        if not has_octomap_rviz and show_rviz:
+        if not has_octomap_rviz and want_rviz:
             print('[mid360] 提示: 没装 octomap_rviz_plugins,rviz 会用去掉 octomap 显示的配置',
                   flush=True)
 
-        if show_rviz:
+        if want_rviz:
             from launch_ros.substitutions import FindPackageShare as _FPS
             template = PathJoinSubstitution([
                 _FPS('bringup'), 'rviz',
@@ -306,7 +303,7 @@ def generate_launch_description():
         return actions
 
     return LaunchDescription([
-        show_rviz_arg,
+        rviz_arg,
         pcd_save_arg,
         backend_arg,
         use_octomap_arg,

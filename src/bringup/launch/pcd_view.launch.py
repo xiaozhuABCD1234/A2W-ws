@@ -1,6 +1,6 @@
 """离线看 PCD:把点云文件当话题发出来 + rviz 显示,不需要雷达/point_lio 在跑。
 
-    ros2 launch bringup pcd_view.launch.py [pcd:=...] [show_rviz:=false] [static_tf:=false]
+    ros2 launch bringup pcd_view.launch.py [pcd:=...] [rviz:=false] [static_tf:=false]
 
 话题 /cloud_pcd 是 pcd_to_pointcloud 写死的(无 topic 参数),frame_id 由 tf_frame 决定。
 
@@ -45,8 +45,8 @@ def generate_launch_description():
                     '"Fixed Frame does not exist" 报错。已经在跑 point_lio 时'
                     '(camera_init 本来就在 TF 里)传 false')
 
-    show_rviz_arg = DeclareLaunchArgument(
-        'show_rviz', default_value='true',
+    rviz_arg = DeclareLaunchArgument(
+        'rviz', default_value='true',
         description='启动 rviz2(用 rviz/pcd_view.rviz)')
 
     # 注意:节点名 pcd_publisher 和话题 /cloud_pcd 都是上游写死的,改不了
@@ -83,7 +83,7 @@ def generate_launch_description():
         arguments=['-d', PathJoinSubstitution([
             FindPackageShare('bringup'), 'rviz', 'pcd_view.rviz'
         ])],
-        condition=IfCondition(LaunchConfiguration('show_rviz')),
+        condition=IfCondition(LaunchConfiguration('rviz')),
     )
 
     return LaunchDescription([
@@ -91,7 +91,7 @@ def generate_launch_description():
         frame_arg,
         period_arg,
         static_tf_arg,
-        show_rviz_arg,
+        rviz_arg,
         pcd_publisher,
         static_tf,
         rviz_node,
