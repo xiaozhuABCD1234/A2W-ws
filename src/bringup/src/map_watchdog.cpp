@@ -4,10 +4,12 @@
 #include <csignal>
 #include <cstdio>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "octomap_msgs/conversions.h"
@@ -47,6 +49,13 @@ public:
 
   void save()
   {
+    std::error_code error;
+    std::filesystem::create_directories(out_dir_, error);
+    if (error) {
+      RCLCPP_ERROR(get_logger(), "cannot create %s: %s", out_dir_.c_str(),
+                   error.message().c_str());
+      return;
+    }
     const std::string stamp = nowStamp();
     const std::string base = prefix_ + "_" + stamp;
     std::string written;
@@ -79,7 +88,16 @@ private:
     const auto & info = map2d_->info;
     const size_t width = info.width;
     const size_t height = info.height;
-    std::vector<unsigned char> pixels(width * height);
+    if (width == 0 || height == 0 || !(info.resolution > 0.0)) {
+      return false;
+    }
+    const size_t cells = width * height;
+    if (map2d_->data.size() < cells) {
+      RCLCPP_WARN(get_logger(), "occupancy grid data is truncated (%zu < %zu)",
+                  map2d_->data.size(), cells);
+      return false;
+    }
+    std::vector<unsigned char> pixels(cells);
     size_t occupied = 0;
     for (size_t row = 0; row < height; ++row) {
       const size_t src = (height - 1 - row) * width;
