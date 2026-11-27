@@ -1,0 +1,25 @@
+/**:
+  ros__parameters:
+    topics.cost: /occupancy_map_2d/map
+    topics.esdf: /esdf/global/distance
+    topics.esdf_meta: /esdf/global/meta
+    topics.robot_profile: /robot_profile
+    topics.goal: /goal_pose
+    topics.path: /planner/path
+
+    frames.world: map
+    frames.robot: base_footprint
+    frames.tf_timeout_ms: 100
+
+    search.angle_search: true
+    search.cost_weight: 1.0
+    search.max_expansions: 300000
+    search.sample_step: 0.05
+    search.time_budget_ms: 500.0
+    search.region_margin: 15.0
+    search.goal_tolerance: 0.50
+
+    collision.min_clearance: 0.05
+    collision.sample_step: 0.05
+    collision.allow_unknown: true
+    collision.min_goal_distance: 0.20

@@ -74,7 +74,10 @@ void RollingCostmap::updateGroundLevel(const PointCloudT& ground,
     ground_z_ = estimate;
     ground_valid_ = true;
   } else {
-    ground_z_ += ground_smoothing_ * (estimate - ground_z_);
+    double delta = ground_smoothing_ * (estimate - ground_z_);
+    const double limit = std::max(0.01, params_.ground_max_step);
+    delta = std::min(limit, std::max(-limit, delta));
+    ground_z_ += delta;
   }
 
   const double offset = ground_z_;
@@ -160,7 +163,7 @@ void RollingCostmap::addFree(int x, int y, double now_sec) {
   } else {
     log_odds_[p] = std::max(min_log_odds_, previous - free_delta_);
   }
-  if (previous >= 0.0f && log_odds_[p] < 0.0f) {
+  if (previous >= occupied_threshold_ && log_odds_[p] < occupied_threshold_) {
     if (occupied_cells_ > 0) --occupied_cells_;
   }
   last_seen_[p] = static_cast<float>(now_sec);
@@ -170,7 +173,9 @@ void RollingCostmap::addOccupied(int x, int y, double now_sec) {
   const size_t p = position(x, y);
   const float previous = log_odds_[p];
   log_odds_[p] = std::min(max_log_odds_, previous + occupied_delta_);
-  if (previous < 0.0f && log_odds_[p] >= 0.0f) ++occupied_cells_;
+  if (previous < occupied_threshold_ && log_odds_[p] >= occupied_threshold_) {
+    ++occupied_cells_;
+  }
   last_seen_[p] = static_cast<float>(now_sec);
 }
 

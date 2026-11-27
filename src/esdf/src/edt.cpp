@@ -41,12 +41,15 @@ void transform1D(const double* f, int n, double* d, int* v, double* z) {
 
 void distanceTransform(const std::vector<int8_t>& cells, int width, int height,
                        const EdtParams& params, std::vector<float>* distance) {
+  if (distance == nullptr) return;
   if (width <= 0 || height <= 0) {
     distance->clear();
     return;
   }
+  const double resolution = std::max(1e-6, params.resolution);
+  const double max_distance = std::max(0.0, params.max_distance);
   const size_t size = static_cast<size_t>(width) * static_cast<size_t>(height);
-  distance->assign(size, static_cast<float>(params.max_distance));
+  distance->assign(size, static_cast<float>(max_distance));
 
   const int threshold = params.occupied_threshold;
   int min_x = width;
@@ -68,7 +71,7 @@ void distanceTransform(const std::vector<int8_t>& cells, int width, int height,
   }
   if (max_x < 0) return;
 
-  const int margin = static_cast<int>(std::ceil(params.max_distance / params.resolution)) + 1;
+  const int margin = static_cast<int>(std::ceil(max_distance / resolution)) + 1;
   const int x0 = std::max(0, min_x - margin);
   const int y0 = std::max(0, min_y - margin);
   const int x1 = std::min(width - 1, max_x + margin);
@@ -117,10 +120,10 @@ void distanceTransform(const std::vector<int8_t>& cells, int width, int height,
     for (int x = 0; x < sub_width; ++x) {
       const double squared = d[static_cast<size_t>(x)];
       const double metres =
-          squared >= kInf * 0.5 ? params.max_distance : std::sqrt(squared) * params.resolution;
+          squared >= kInf * 0.5 ? max_distance : std::sqrt(squared) * resolution;
       (*distance)[static_cast<size_t>(y0 + y) * static_cast<size_t>(width) +
                   static_cast<size_t>(x0 + x)] =
-          static_cast<float>(std::min(params.max_distance, metres));
+          static_cast<float>(std::min(max_distance, metres));
     }
   }
 }
@@ -128,10 +131,17 @@ void distanceTransform(const std::vector<int8_t>& cells, int width, int height,
 void gradient(const std::vector<float>& distance, int width, int height, double resolution,
               double max_distance, std::vector<float>* gradient_x,
               std::vector<float>* gradient_y) {
+  if (gradient_x == nullptr || gradient_y == nullptr) return;
+  if (width <= 0 || height <= 0 || distance.size() <
+      static_cast<size_t>(width) * static_cast<size_t>(height)) {
+    gradient_x->clear();
+    gradient_y->clear();
+    return;
+  }
   const size_t size = static_cast<size_t>(width) * static_cast<size_t>(height);
   gradient_x->assign(size, 0.0f);
   gradient_y->assign(size, 0.0f);
-  if (width <= 2 || height <= 2) return;
+  if (width <= 2 || height <= 2 || !(resolution > 0.0)) return;
   const float scale = static_cast<float>(0.5 / resolution);
   for (int y = 1; y + 1 < height; ++y) {
     for (int x = 1; x + 1 < width; ++x) {
@@ -151,7 +161,10 @@ void gradient(const std::vector<float>& distance, int width, int height, double 
 
 float bilinear(const std::vector<float>& values, int width, int height, double x, double y,
                float fallback) {
-  if (width <= 0 || height <= 0 || values.empty()) return fallback;
+  if (width <= 0 || height <= 0 ||
+      values.size() < static_cast<size_t>(width) * static_cast<size_t>(height)) {
+    return fallback;
+  }
   const double clamped_x = std::min(std::max(x, 0.0), static_cast<double>(width - 1));
   const double clamped_y = std::min(std::max(y, 0.0), static_cast<double>(height - 1));
   const int x0 = static_cast<int>(std::floor(clamped_x));

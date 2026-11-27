@@ -1,0 +1,19 @@
+/**:
+  ros__parameters:
+    frames.odom: body
+    frames.base: base_footprint
+    frames.offset_x: 0.0
+    frames.offset_y: 0.0
+    frames.offset_z: 0.0
+    frames.offset_yaw: 0.0
+
+    footprint.points: [0.16, -0.14, 0.16, 0.14, -0.16, 0.14, -0.16, -0.14]
+    footprint.padding: 0.02
+    footprint.height: 0.19
+
+    limits.max_linear_velocity: 0.80
+    limits.max_linear_acceleration: 0.80
+    limits.max_angular_velocity: 1.20
+    limits.max_angular_acceleration: 2.00
+
+    publish_period_ms: 1000

@@ -36,6 +36,21 @@ bool cellAt(const CostmapSnapshot& snapshot, double x, double y, int8_t* value) 
   return true;
 }
 
+PointCloudT makeGround(double z) {
+  PointCloudT cloud;
+  for (int i = -12; i <= 12; ++i) {
+    for (int j = -12; j <= 12; ++j) {
+      pcl::PointXYZI point;
+      point.x = static_cast<float>(0.2 * i);
+      point.y = static_cast<float>(0.2 * j);
+      point.z = static_cast<float>(z);
+      point.intensity = 1.0f;
+      cloud.push_back(point);
+    }
+  }
+  return cloud;
+}
+
 PointCloudT makeWall(double x, double y_from, double y_to, double z, double step = 0.1) {
   PointCloudT cloud;
   const int steps = static_cast<int>(std::lround((y_to - y_from) / step));
@@ -216,6 +231,26 @@ TEST(CostmapTest, slopeTrackingKeepsObstaclesInsideBand) {
   ASSERT_TRUE(cellAt(snapshot, 1.0, 0.0, &floor_value));
   EXPECT_GT(wall_value, 50);
   EXPECT_LT(floor_value, 50);
+}
+
+TEST(CostmapTest, groundLevelCannotJumpInOneFrame) {
+  CostmapParams params = makeParams();
+  params.ground_relative = true;
+  params.ground_smoothing = 1.0;
+  params.ground_percentile = 0.5;
+  params.ground_radius = 6.0;
+  params.ground_max_step = 0.25;
+  RollingCostmap costmap(params);
+  costmap.reset(0.0, 0.0);
+
+  const PointCloudT ground = makeGround(0.0);
+  costmap.update(ground, PointCloudT(), Eigen::Isometry3d::Identity(), 0.0);
+  ASSERT_TRUE(costmap.hasGround());
+  const double before = costmap.groundZ();
+
+  const PointCloudT high = makeGround(1.5);
+  costmap.update(high, PointCloudT(), Eigen::Isometry3d::Identity(), 0.1);
+  EXPECT_NEAR(costmap.groundZ() - before, 0.25, 1e-6);
 }
 
 TEST(CostmapTest, clearResetsToUnknown) {

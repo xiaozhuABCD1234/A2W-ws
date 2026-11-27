@@ -1,0 +1,19 @@
+/**:
+  ros__parameters:
+    topics.lidar: /livox/lidar
+    topics.imu: /livox/imu
+    topics.clock: /clock
+    topics.cmd_vel: /cmd_vel
+
+    gz.lidar: /lidar
+    gz.imu: /imu
+    gz.clock: /clock
+    gz.cmd_vel: /cmd_vel
+
+    frames.lidar: body
+    lidar.scan_period: 0.1
+
+    imu.median_window: 5
+
+    clock.publish: true
+

@@ -22,6 +22,15 @@ slam *args:
 
 alias run := slam
 
+sim *args:
+    bash -c 'source /opt/ros/{{ros_distro}}/setup.bash && source {{ws}}/install/setup.bash && \
+    cd {{ws}} && ros2 launch bringup slam.launch.py sim:=true sim_headless:=false \
+    use_sim_time:=true use_driver:=false rviz:=true robot_model:=true planner:=true controller:=true {{args}}'
+
+teleop *args:
+    bash -c 'source /opt/ros/{{ros_distro}}/setup.bash && source {{ws}}/install/setup.bash && \
+    ros2 run teleop_twist_keyboard teleop_twist_keyboard {{args}}'
+
 replay bag="" rate="1.0" *args:
     bash -c 'source /opt/ros/{{ros_distro}}/setup.bash && source {{ws}}/install/setup.bash && \
     cd {{ws}} && b="{{bag}}"; b="${b#bag=}"; \

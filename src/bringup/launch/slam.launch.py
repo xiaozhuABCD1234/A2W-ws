@@ -12,6 +12,7 @@ mid360_driver:UDP 收流直接发 /livox/lidar(PointCloud2)与 /livox/imu,
 
 """
 
+import glob
 import os
 import tempfile
 
@@ -38,6 +39,17 @@ def _has_package(name):
         return True
     except Exception:
         return False
+
+
+def _octomap_preload():
+    """返回可用的 liboctomap 路径;不同发行版/架构版本号不同,不能写死。"""
+    for pattern in ('/usr/lib/*-linux-gnu/liboctomap.so.*',
+                    '/usr/lib/liboctomap.so.*',
+                    '/usr/local/lib/liboctomap.so.*'):
+        for path in sorted(glob.glob(pattern)):
+            if os.path.isfile(path):
+                return path
+    return ''
 
 
 def _prepare_rviz_config(template_path, fixed_frame, drop_octomap_plugin):
@@ -139,11 +151,44 @@ def generate_launch_description():
         'esdf', default_value='true',
         description='是否启动 esdf(Felzenszwalb 距离场,供规划启发式与碰撞半径查询)')
 
+    robot_model_arg = DeclareLaunchArgument(
+        'robot_model', default_value='true',
+        description='是否启动 robot_model(足迹多边形/内切外接半径/速度加速度限幅/robot_description)')
+
+    planner_arg = DeclareLaunchArgument(
+        'planner', default_value='false',
+        description='是否启动 planner(Octile A* / Theta* + 足迹碰撞的全局规划)')
+    controller_arg = DeclareLaunchArgument(
+        'controller', default_value='false',
+        description='是否启动 controller(梯度平滑 + MPPI + 纯跟踪兜底,输出 /cmd_vel)')
+
     use_sim_time_arg = DeclareLaunchArgument(
         'use_sim_time', default_value='false')
 
     use_driver_arg = DeclareLaunchArgument(
         'use_driver', default_value='true')
+
+    sim_arg = DeclareLaunchArgument(
+        'sim', default_value='false',
+        description='是否用 Gazebo Harmonic 仿真替代真实驱动(sim_mid360:dart+bullet 雷达 + IMU)')
+
+    sim_headless_arg = DeclareLaunchArgument(
+        'sim_headless', default_value='false',
+        description='sim:=true 时是否关闭 Gazebo GUI')
+
+    mount_pitch_arg = DeclareLaunchArgument(
+        'mount_pitch', default_value='0.0',
+        description='雷达相对底盘的俯仰安装角(rad),0 = 与底盘平行,0.5236 = 前倾 30 度')
+
+    mount_roll_arg = DeclareLaunchArgument(
+        'mount_roll', default_value='0.0', description='雷达相对底盘的横滚安装角(rad)')
+
+    mount_yaw_arg = DeclareLaunchArgument(
+        'mount_yaw', default_value='0.0', description='雷达相对底盘的偏航安装角(rad)')
+
+    mount_x_arg = DeclareLaunchArgument('mount_x', default_value='0.10')
+    mount_y_arg = DeclareLaunchArgument('mount_y', default_value='0.0')
+    mount_z_arg = DeclareLaunchArgument('mount_z', default_value='0.24')
 
     driver = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([
@@ -154,6 +199,24 @@ def generate_launch_description():
             'use_sim_time': LaunchConfiguration('use_sim_time'),
         }.items(),
         condition=IfCondition(LaunchConfiguration('use_driver')),
+    )
+
+    simulator = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(PathJoinSubstitution([
+            FindPackageShare('sim_mid360'),
+            'launch', 'sim.launch.py',
+        ])),
+        launch_arguments={
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+            'headless': LaunchConfiguration('sim_headless'),
+            'mount_x': LaunchConfiguration('mount_x'),
+            'mount_y': LaunchConfiguration('mount_y'),
+            'mount_z': LaunchConfiguration('mount_z'),
+            'mount_roll': LaunchConfiguration('mount_roll'),
+            'mount_pitch': LaunchConfiguration('mount_pitch'),
+            'mount_yaw': LaunchConfiguration('mount_yaw'),
+        }.items(),
+        condition=IfCondition(LaunchConfiguration('sim')),
     )
 
     point_lio = GroupAction(scoped=True, actions=[IncludeLaunchDescription(
@@ -225,6 +288,45 @@ def generate_launch_description():
             'use_sim_time': LaunchConfiguration('use_sim_time'),
         }.items(),
         condition=IfCondition(LaunchConfiguration('esdf')),
+    )
+
+    robot_model = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(PathJoinSubstitution([
+            FindPackageShare('robot_model'),
+            'launch', 'robot_model.launch.py',
+        ])),
+        launch_arguments={
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+            'mount_x': LaunchConfiguration('mount_x'),
+            'mount_y': LaunchConfiguration('mount_y'),
+            'mount_z': LaunchConfiguration('mount_z'),
+            'mount_roll': LaunchConfiguration('mount_roll'),
+            'mount_pitch': LaunchConfiguration('mount_pitch'),
+            'mount_yaw': LaunchConfiguration('mount_yaw'),
+        }.items(),
+        condition=IfCondition(LaunchConfiguration('robot_model')),
+    )
+
+    planner_node = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(PathJoinSubstitution([
+            FindPackageShare('planner'),
+            'launch', 'planner.launch.py',
+        ])),
+        launch_arguments={
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+        }.items(),
+        condition=IfCondition(LaunchConfiguration('planner')),
+    )
+
+    controller_node = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(PathJoinSubstitution([
+            FindPackageShare('controller'),
+            'launch', 'controller.launch.py',
+        ])),
+        launch_arguments={
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+        }.items(),
+        condition=IfCondition(LaunchConfiguration('controller')),
     )
 
     def _backend_include(context):
@@ -344,6 +446,11 @@ def generate_launch_description():
             # octomap_rviz_plugins 2.1.0 的 .so 缺 liboctomap 的 DT_NEEDED,
             # 不预加载会 dlopen 失败(undefined symbol OcTreeStamped)。
             # 必须用 additional_env:env= 会替换整个环境,冲掉 LD_LIBRARY_PATH。
+            preload = _octomap_preload()
+            if not preload:
+                print('[mid360] 提示: 没找到 liboctomap.so,rviz 的 octomap 插件可能加载失败',
+                      flush=True)
+            rviz_env = {'LD_PRELOAD': preload} if preload else {}
             actions.append(Node(
                 package='rviz2',
                 executable='rviz2',
@@ -352,7 +459,7 @@ def generate_launch_description():
                 arguments=['-d', rviz_cfg],
                 parameters=[{'use_sim_time': ParameterValue(
                     LaunchConfiguration('use_sim_time'), value_type=bool)}],
-                additional_env={'LD_PRELOAD': '/usr/lib/x86_64-linux-gnu/liboctomap.so.1.9.7'},
+                additional_env=rviz_env,
             ))
         return actions
 
@@ -369,9 +476,21 @@ def generate_launch_description():
         occupancy_map_2d_arg,
         costmap_arg,
         esdf_arg,
+        robot_model_arg,
+        planner_arg,
+        controller_arg,
         use_sim_time_arg,
         use_driver_arg,
+        sim_arg,
+        sim_headless_arg,
+        mount_pitch_arg,
+        mount_roll_arg,
+        mount_yaw_arg,
+        mount_x_arg,
+        mount_y_arg,
+        mount_z_arg,
         driver,
+        simulator,
         point_lio,
         relocalization,
         filter_arg,
@@ -380,6 +499,9 @@ def generate_launch_description():
         occupancy_map_2d,
         costmap_2d,
         esdf,
+        robot_model,
+        planner_node,
+        controller_node,
         OpaqueFunction(function=_backend_include),
         OpaqueFunction(function=_octomap_and_rviz),
     ])

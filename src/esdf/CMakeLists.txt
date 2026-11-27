@@ -30,6 +30,9 @@ ament_target_dependencies(esdf_node
 
 install(TARGETS esdf_node
   DESTINATION lib/${PROJECT_NAME})
+install(TARGETS esdf_core
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib)
 install(DIRECTORY include/
   DESTINATION include)
 install(DIRECTORY config launch

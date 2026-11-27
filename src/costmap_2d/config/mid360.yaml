@@ -20,6 +20,7 @@
     z.ground_radius: 4.0
     z.ground_percentile: 0.15
     z.ground_smoothing: 0.3
+    z.ground_max_step: 0.25
     z.clear_min: -0.30
     z.clear_max: 1.30
     z.obstacle_min: 0.05

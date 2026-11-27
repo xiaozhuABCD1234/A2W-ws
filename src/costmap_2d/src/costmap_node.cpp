@@ -102,6 +102,7 @@ class CostmapNode : public rclcpp::Node {
     params_.ground_radius = param<double>("z.ground_radius", params_.ground_radius);
     params_.ground_percentile = param<double>("z.ground_percentile", params_.ground_percentile);
     params_.ground_smoothing = param<double>("z.ground_smoothing", params_.ground_smoothing);
+    params_.ground_max_step = param<double>("z.ground_max_step", params_.ground_max_step);
     params_.blind_hold_sec = param<double>("fuse.blind_hold_sec", params_.blind_hold_sec);
     params_.occupied_decay = param<double>("fuse.occupied_decay", params_.occupied_decay);
     params_.free_decay = param<double>("fuse.free_decay", params_.free_decay);

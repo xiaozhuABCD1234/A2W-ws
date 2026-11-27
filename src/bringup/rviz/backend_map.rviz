@@ -177,6 +177,58 @@ Visualization Manager:
       Color: 255; 140; 0
 
     # 坐标系:map -> camera_init(后端) -> body(point_lio)
+    - Class: rviz_default_plugins/Path
+      Name: PlannerPath
+      Enabled: true
+      Topic:
+        Value: /planner/path
+      Line Style: Billboards
+      Line Width: 0.08
+      Color: 255; 200; 60
+      Alpha: 1
+      Buffer Length: 1
+
+    - Class: rviz_default_plugins/Path
+      Name: ControllerPath
+      Enabled: true
+      Topic:
+        Value: /controller/smoothed_path
+      Line Style: Lines
+      Line Width: 0.04
+      Color: 120; 255; 170
+      Alpha: 0.9
+      Buffer Length: 1
+
+    - Class: rviz_default_plugins/MarkerArray
+      Name: ControllerTrajectory
+      Enabled: true
+      Namespaces: {}
+      Topic:
+        Value: /controller/trajectory
+        Depth: 1
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+
+    - Class: rviz_default_plugins/Polygon
+      Name: RobotFootprint
+      Enabled: true
+      Topic:
+        Value: /robot_footprint
+      Color: 0; 255; 255
+      Alpha: 0.6
+
+    - Class: rviz_default_plugins/RobotModel
+      Name: RobotModel
+      Enabled: true
+      Description Source: Topic
+      Description Topic:
+        Value: /robot_description
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Visual Enabled: true
+      Collision Enabled: false
+      Alpha: 0.8
+
     - Class: rviz_default_plugins/TF
       Name: TF
       Enabled: true
@@ -190,6 +242,11 @@ Visualization Manager:
     - Class: rviz_default_plugins/MoveCamera
     - Class: rviz_default_plugins/Select
     - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
   Window Geometry:
     Width: 1280
     Height: 800

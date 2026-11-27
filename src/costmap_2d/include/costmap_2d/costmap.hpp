@@ -35,6 +35,7 @@ struct CostmapParams {
   double ground_radius = 4.0;
   double ground_percentile = 0.15;
   double ground_smoothing = 0.3;
+  double ground_max_step = 0.25;
   double blind_hold_sec = 2.0;
   double occupied_decay = 0.12;
   double free_decay = 0.02;

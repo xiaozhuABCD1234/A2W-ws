@@ -1,0 +1,9 @@
+std_msgs/Header header
+geometry_msgs/Polygon footprint
+float64 inscribed_radius
+float64 circumscribed_radius
+float64 height
+float64 max_linear_velocity
+float64 max_linear_acceleration
+float64 max_angular_velocity
+float64 max_angular_acceleration

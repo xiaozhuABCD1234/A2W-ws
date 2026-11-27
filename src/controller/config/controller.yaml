@@ -1,0 +1,75 @@
+/**:
+  ros__parameters:
+    topics.path: /planner/path
+    topics.esdf: /esdf/local/distance
+    topics.esdf_meta: /esdf/local/meta
+    topics.robot_profile: /robot_profile
+    topics.cmd_vel: /cmd_vel
+    topics.smoothed_path: /controller/smoothed_path
+    topics.trajectory: /controller/trajectory
+
+    frames.world: map
+    frames.robot: base_footprint
+    frames.tf_timeout_ms: 100
+
+    runtime.period_ms: 50
+    runtime.field_max_distance: 3.0
+    runtime.publish_markers: true
+
+    controller.goal_tolerance: 0.20
+    controller.stuck_timeout: 3.0
+
+    smoother.enabled: true
+    smoother.iterations: 600
+    smoother.tolerance: 0.0005
+    smoother.w_data: 0.25
+    smoother.w_smooth: 0.40
+    smoother.w_obstacle: 0.60
+    smoother.alpha: 0.60
+    smoother.max_step: 0.05
+    smoother.min_clearance: 0.22
+    smoother.time_budget_ms: 100.0
+    smoother.refinement: 1
+    smoother.resample_step: 0.05
+
+    mppi.enabled: true
+    mppi.batch: 400
+    mppi.time_steps: 40
+    mppi.model_dt: 0.05
+    mppi.iterations: 1
+    mppi.temperature: 0.30
+    mppi.gamma: 0.015
+    mppi.sigma_linear: 0.20
+    mppi.sigma_angular: 0.35
+    mppi.shift_steps: 1
+    mppi.w_path: 1.0
+    mppi.w_goal: 1.6
+    mppi.w_obstacle: 0.9
+    mppi.w_heading: 0.35
+    mppi.w_prefer_forward: 0.05
+    mppi.w_constraint: 3.0
+    mppi.collision_penalty: 100000.0
+    mppi.safe_distance: 0.40
+    mppi.critical_clearance: 0.25
+    mppi.near_goal_distance: 0.60
+    mppi.path_step: 3
+    mppi.path_window: 40
+    mppi.max_linear: 0.80
+    mppi.min_linear: 0.0
+    mppi.max_angular: 1.20
+
+    pure_pursuit.enabled: true
+    pure_pursuit.desired_linear: 0.60
+    pure_pursuit.lookahead_time: 1.10
+    pure_pursuit.min_lookahead: 0.35
+    pure_pursuit.max_lookahead: 1.10
+    pure_pursuit.min_radius: 0.35
+    pure_pursuit.approach_distance: 0.70
+    pure_pursuit.min_approach_speed: 0.06
+    pure_pursuit.rotate_angle: 1.20
+    pure_pursuit.rotate_angular: 0.90
+
+    limits.max_linear_velocity: 0.80
+    limits.max_angular_velocity: 1.20
+    limits.max_linear_acceleration: 0.80
+    limits.max_angular_acceleration: 2.00
