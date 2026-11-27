@@ -88,7 +88,7 @@ def generate_launch_description():
     pcd_save_arg = DeclareLaunchArgument(
         'pcd_save', default_value='',
         description='是否把建图点云落盘(先验地图用)。留空 = 用 point_lio 的 yaml '
-                    '(现为 true);显式 true/false 才覆盖。注意:只在节点【正常退出】'
+                    '(现为 false);显式 true/false 才覆盖。注意:只在节点【正常退出】'
                     '(Ctrl+C)时写一次,写到 ./PCD/scans.pcd(相对运行本 launch 的目录)')
 
     use_octomap_arg = DeclareLaunchArgument(
@@ -111,6 +111,22 @@ def generate_launch_description():
 
     ground_segmentation_arg = DeclareLaunchArgument(
         'ground_segmentation', default_value='true')
+
+    filter_arg = DeclareLaunchArgument(
+        'filter', default_value='true',
+        description='是否启动 filter(在线剔除行人点云)。开启时 ground_segmentation '
+                    '与 octomap 改吃 /filter/cloud_static')
+
+    filter_node = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(PathJoinSubstitution([
+            FindPackageShare('filter'),
+            'launch', 'filter.launch.py',
+        ])),
+        launch_arguments={
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+        }.items(),
+        condition=IfCondition(LaunchConfiguration('filter')),
+    )
 
     occupancy_map_2d_arg = DeclareLaunchArgument(
         'occupancy_map_2d', default_value='true')
@@ -155,16 +171,20 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('relocalization')),
     )
 
-    ground_segmentation = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(PathJoinSubstitution([
-            FindPackageShare('ground_segmentation'),
-            'launch', 'ground_segmentation.launch.py',
-        ])),
-        launch_arguments={
-            'use_sim_time': LaunchConfiguration('use_sim_time'),
-        }.items(),
-        condition=IfCondition(LaunchConfiguration('ground_segmentation')),
-    )
+    def _ground_segmentation(context):
+        use_filter = context.perform_substitution(
+            LaunchConfiguration('filter')).strip().lower() in ('1', 'true', 'yes', 'on')
+        return [IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(PathJoinSubstitution([
+                FindPackageShare('ground_segmentation'),
+                'launch', 'ground_segmentation.launch.py',
+            ])),
+            launch_arguments={
+                'use_sim_time': LaunchConfiguration('use_sim_time'),
+                'cloud_topic': '/filter/cloud_static' if use_filter else '',
+            }.items(),
+            condition=IfCondition(LaunchConfiguration('ground_segmentation')),
+        )]
 
     occupancy_map_2d = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(PathJoinSubstitution([
@@ -258,7 +278,8 @@ def generate_launch_description():
                 name='octomap_server',
                 output='screen',
                 parameters=params,
-                remappings=[('cloud_in', '/cloud_registered_body')],
+                remappings=[('cloud_in', '/filter/cloud_static' if _is_on(
+                    'filter') else '/cloud_registered_body')],
             ))
             actions.append(Node(
                 package='bringup',
@@ -321,7 +342,9 @@ def generate_launch_description():
         driver,
         point_lio,
         relocalization,
-        ground_segmentation,
+        filter_arg,
+        filter_node,
+        OpaqueFunction(function=_ground_segmentation),
         occupancy_map_2d,
         OpaqueFunction(function=_backend_include),
         OpaqueFunction(function=_octomap_and_rviz),
