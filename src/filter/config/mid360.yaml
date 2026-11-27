@@ -1,0 +1,59 @@
+/**:
+  ros__parameters:
+    runtime.odom_topic: /aft_mapped_to_init
+    runtime.cloud_topic: /cloud_registered_body
+    runtime.static_topic: /filter/cloud_static
+    runtime.pedestrian_topic: /filter/cloud_pedestrian
+    runtime.stamp_tolerance: 0.05
+    runtime.log_period_frames: 100
+    runtime.max_pose_buffer: 200
+    runtime.cloud_frame: body
+    runtime.pose_frame: camera_init
+
+    filter.voxel_size: 0.20
+    filter.min_range: 0.5
+    filter.max_range: 15.0
+    filter.min_height: -1.50
+    filter.max_height: 2.50
+    filter.azimuth_step_deg: 2.0
+    filter.elevation_step_deg: 2.0
+    filter.max_rays_per_frame: 6000
+    filter.free_frames_threshold: 4
+    filter.free_label_score: -3
+    filter.occupied_score: 2
+    filter.free_score: 1
+    filter.min_score: -6
+    filter.max_score: 6
+    filter.occupied_recent_gain: 4
+    filter.cluster_radius: 0.50
+    filter.relearn_frames: 0
+    filter.decay_period_frames: 300
+    filter.max_voxels: 400000.0
+
+    pedestrian.cell_size: 0.30
+    pedestrian.min_points: 20
+    pedestrian.max_width: 1.20
+    pedestrian.max_depth: 1.20
+    pedestrian.min_extent: 0.70
+    pedestrian.max_extent: 2.20
+    pedestrian.max_footprint: 1.40
+    pedestrian.min_aspect: 2.00
+    pedestrian.keep_unmatched: true
+
+    self.enabled: true
+    self.min_x: -0.45
+    self.max_x: 0.45
+    self.min_y: -0.45
+    self.max_y: 0.45
+    self.min_z: -1.20
+    self.max_z: 0.10
+    self.margin: 0.0
+    self.min_range: 0.0
+
+    detection.enabled: true
+    detection.topic: /filter/pedestrian_boxes
+    detection.expand: 0.20
+    detection.timeout: 0.30
+    detection.min_height: -0.50
+    detection.max_height: 2.50
+    detection.min_size: 0.05
