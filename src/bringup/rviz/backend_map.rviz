@@ -85,9 +85,13 @@ Visualization Manager:
       Size (Pixels): 4
       Color Transformer: Intensity
       Color: 255; 255; 255
-      Autocompute Intensity Bounds: true
+      Channel Name: intensity
+      Autocompute Intensity Bounds: false
+      Min Intensity: 0
+      Max Intensity: 3
+      Invert Rainbow: false
+      Use rainbow: true
       Autocompute Value Bounds: true
-      Axis: Z
       Position Transformer: XYZ
       Use Fixed Frame: true
 
@@ -103,9 +107,13 @@ Visualization Manager:
       Size (Pixels): 3
       Color Transformer: Intensity
       Color: 255; 255; 255
-      Autocompute Intensity Bounds: true
+      Channel Name: intensity
+      Autocompute Intensity Bounds: false
+      Min Intensity: 0
+      Max Intensity: 10
+      Invert Rainbow: false
+      Use rainbow: true
       Autocompute Value Bounds: true
-      Axis: Z
       Position Transformer: XYZ
       Use Fixed Frame: true
 
