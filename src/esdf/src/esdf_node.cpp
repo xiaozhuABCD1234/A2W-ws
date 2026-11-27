@@ -68,6 +68,7 @@ class EsdfNode : public rclcpp::Node {
     params_.unknown_is_obstacle =
         param<bool>("esdf.unknown_is_obstacle", params_.unknown_is_obstacle);
     downsample_ = param<int>("esdf.downsample", downsample_);
+    crop_to_known_ = param<bool>("esdf.crop_to_known", crop_to_known_);
     points_period_ms_ = param<int>("points_period_ms", points_period_ms_);
     points_max_ = param<int>("points_max", points_max_);
     downsample_ = std::max(1, downsample_);
@@ -94,52 +95,98 @@ class EsdfNode : public rclcpp::Node {
     params.resolution = source_resolution * step;
 
     const auto start = std::chrono::steady_clock::now();
+    const int occupied = params.occupied_threshold;
     std::vector<int8_t> reduced(static_cast<size_t>(width) * static_cast<size_t>(height), -1);
-    size_t obstacles = 0;
-    size_t free_cells = 0;
-    for (int y = 0; y < height; ++y) {
-      for (int x = 0; x < width; ++x) {
-        int8_t value = -1;
-        for (int oy = 0; oy < step; ++oy) {
-          const int sy = y * step + oy;
-          if (sy >= source_height) break;
-          for (int ox = 0; ox < step; ++ox) {
-            const int sx = x * step + ox;
-            if (sx >= source_width) break;
-            const int8_t cell = msg->data[static_cast<size_t>(sy) *
-                                              static_cast<size_t>(source_width) +
-                                          static_cast<size_t>(sx)];
-            if (cell >= params.occupied_threshold) {
-              value = cell;
-              break;
+    if (step == 1) {
+      std::memcpy(reduced.data(), msg->data.data(), reduced.size());
+    } else {
+      for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+          int8_t value = -1;
+          for (int oy = 0; oy < step; ++oy) {
+            const int sy = y * step + oy;
+            if (sy >= source_height) break;
+            for (int ox = 0; ox < step; ++ox) {
+              const int sx = x * step + ox;
+              if (sx >= source_width) break;
+              const int8_t cell = msg->data[static_cast<size_t>(sy) *
+                                                static_cast<size_t>(source_width) +
+                                            static_cast<size_t>(sx)];
+              if (cell >= occupied) {
+                value = cell;
+                break;
+              }
+              if (cell >= 0 && value < 0) value = 0;
             }
-            if (cell >= 0 && value < 0) value = 0;
+            if (value >= occupied) break;
           }
-          if (value >= params.occupied_threshold) break;
-        }
-        reduced[static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)] =
-            value;
-        if (value >= params.occupied_threshold) {
-          ++obstacles;
-        } else if (value >= 0) {
-          ++free_cells;
+          reduced[static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)] =
+              value;
         }
       }
     }
 
+    size_t obstacles = 0;
+    size_t free_cells = 0;
+    int known_min_x = width;
+    int known_min_y = height;
+    int known_max_x = -1;
+    int known_max_y = -1;
+    for (int y = 0; y < height; ++y) {
+      const int8_t* row = &reduced[static_cast<size_t>(y) * static_cast<size_t>(width)];
+      for (int x = 0; x < width; ++x) {
+        const int8_t value = row[x];
+        if (value >= occupied) {
+          ++obstacles;
+        } else if (value >= 0) {
+          ++free_cells;
+        }
+        if (value >= 0) {
+          if (x < known_min_x) known_min_x = x;
+          if (x > known_max_x) known_max_x = x;
+          if (y < known_min_y) known_min_y = y;
+          known_max_y = y;
+        }
+      }
+    }
+
+    int x0 = 0;
+    int y0 = 0;
+    int crop_width = width;
+    int crop_height = height;
+    if (crop_to_known_ && known_max_x >= known_min_x && known_max_y >= known_min_y) {
+      const int margin =
+          static_cast<int>(std::ceil(params.max_distance / params.resolution)) + 1;
+      x0 = std::max(0, known_min_x - margin);
+      y0 = std::max(0, known_min_y - margin);
+      crop_width = std::min(width - 1, known_max_x + margin) - x0 + 1;
+      crop_height = std::min(height - 1, known_max_y + margin) - y0 + 1;
+    }
+
+    std::vector<int8_t> cropped(static_cast<size_t>(crop_width) * static_cast<size_t>(crop_height),
+                                -1);
+    for (int y = 0; y < crop_height; ++y) {
+      std::memcpy(&cropped[static_cast<size_t>(y) * static_cast<size_t>(crop_width)],
+                  &reduced[static_cast<size_t>(y + y0) * static_cast<size_t>(width) +
+                          static_cast<size_t>(x0)],
+                  static_cast<size_t>(crop_width));
+    }
+
     std::vector<float> distance;
-    distanceTransform(reduced, width, height, params, &distance);
+    distanceTransform(cropped, crop_width, crop_height, params, &distance);
     const double elapsed_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 
     geometry_msgs::msg::Pose origin = msg->info.origin;
+    origin.position.x += static_cast<double>(x0) * params.resolution;
+    origin.position.y += static_cast<double>(y0) * params.resolution;
     origin.position.z = 0.0;
     origin.orientation.w = 1.0;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       distance_ = std::move(distance);
-      width_ = width;
-      height_ = height;
+      width_ = crop_width;
+      height_ = crop_height;
       resolution_ = params.resolution;
       origin_x_ = origin.position.x;
       origin_y_ = origin.position.y;
@@ -245,6 +292,7 @@ class EsdfNode : public rclcpp::Node {
   bool publish_points_ = true;
   int point_stride_ = 2;
   int downsample_ = 1;
+  bool crop_to_known_ = true;
   int points_period_ms_ = 500;
   int points_max_ = 60000;
   double last_points_sec_ = 0.0;

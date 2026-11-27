@@ -15,3 +15,4 @@
     esdf.occupied_threshold: 65
     esdf.unknown_is_obstacle: false
     esdf.downsample: 1
+    esdf.crop_to_known: true
