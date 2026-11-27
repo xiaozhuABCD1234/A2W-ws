@@ -6,8 +6,8 @@
     query_topic: /esdf/global/query
     query_response_topic: /esdf/global/query_distance
     points_topic: /esdf/global/points
-    publish_points: false
-    point_stride: 4
+    publish_points: true
+    point_stride: 6
     esdf.resolution: 0.10
     esdf.max_distance: 10.0
     esdf.occupied_threshold: 65
