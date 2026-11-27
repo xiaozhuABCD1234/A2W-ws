@@ -166,6 +166,10 @@ class DynamicFilterNode : public rclcpp::Node {
                                       static_cast<float>(pose.orientation.x),
                                       static_cast<float>(pose.orientation.y),
                                       static_cast<float>(pose.orientation.z));
+    if (!sample.translation.allFinite() || !rotation.coeffs().allFinite() ||
+        rotation.norm() < 1e-6f) {
+      return;
+    }
     sample.rotation = rotation.normalized().toRotationMatrix();
     std::lock_guard<std::mutex> lock(filter_mutex_);
     if (!poses_.empty() && sample.stamp <= poses_.back().stamp) {
@@ -176,14 +180,19 @@ class DynamicFilterNode : public rclcpp::Node {
   }
 
   void detectionCallback(const visualization_msgs::msg::MarkerArray::ConstSharedPtr msg) {
+    if (msg->markers.empty()) {
+      std::lock_guard<std::mutex> lock(filter_mutex_);
+      detection_gate_->reset();
+      return;
+    }
     std::vector<DetectionBox> boxes;
     boxes.reserve(msg->markers.size());
-    const std::string& frame = msg->markers.empty() ? std::string() : msg->markers.front().header.frame_id;
-    bool convertible = !msg->markers.empty();
+    const std::string frame = msg->markers.front().header.frame_id;
+    const double stamp = seconds(msg->markers.front().header.stamp);
+    bool convertible = false;
     PoseSample pose;
     {
       std::lock_guard<std::mutex> lock(filter_mutex_);
-      const double stamp = seconds(msg->markers.front().header.stamp);
       Eigen::Isometry3f transform = Eigen::Isometry3f::Identity();
       if (frame == pose_frame_) {
         convertible = true;
@@ -226,7 +235,7 @@ class DynamicFilterNode : public rclcpp::Node {
                                         static_cast<float>(marker.scale.z) * 0.5f);
         boxes.push_back(box);
       }
-      detection_gate_->set(boxes, seconds(msg->markers.front().header.stamp));
+      detection_gate_->set(boxes, stamp);
     }
   }
 
@@ -250,7 +259,13 @@ class DynamicFilterNode : public rclcpp::Node {
     const auto start = std::chrono::steady_clock::now();
     const size_t total = static_cast<size_t>(msg->width) * static_cast<size_t>(msg->height);
     const size_t step = msg->point_step;
-    if (total == 0 || step == 0) return;
+    if (total == 0 || step < sizeof(float) * 3) return;
+    if (msg->data.size() < total * step) {
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000,
+                           "cloud data is truncated (%zu < %zu)", msg->data.size(),
+                           total * step);
+      return;
+    }
     const auto* base = msg->data.data();
     std::vector<Eigen::Vector3f> points(total);
     for (size_t index = 0; index < total; ++index) {
