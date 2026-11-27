@@ -85,6 +85,23 @@ TEST(SearchTest, bresenhamDetectsBlockedCell) {
   EXPECT_TRUE(planner::lineOfSightCells(grid, a, {0.05, 0.95}));
 }
 
+TEST(SearchTest, malformedGridDataIsTreatedAsBlocked) {
+  GridMap grid = makeGrid(4, 4);
+  grid.blocked.clear();
+  EXPECT_TRUE(grid.blockedAt(0, 0));
+  EXPECT_FLOAT_EQ(grid.costAt(0, 0), 1.0f);
+
+  planner::EsdfField field;
+  field.width = 4;
+  field.height = 4;
+  field.resolution = 0.1;
+  field.max_distance = 3.0f;
+  EXPECT_FLOAT_EQ(field.at(0.0, 0.0), field.max_distance);
+  field.data.assign(4, 1.0f);
+  EXPECT_FLOAT_EQ(field.at(0.0, 0.0), 1.0f);
+  EXPECT_FLOAT_EQ(field.at(0.25, 0.25), field.max_distance);
+}
+
 TEST(SearchTest, lineOfSightAcceptsEmptyFreeCallback) {
   GridMap grid = makeGrid(10, 10);
   planner::FreeFn no_checker;

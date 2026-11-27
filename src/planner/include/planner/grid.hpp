@@ -33,10 +33,16 @@ struct GridMap {
   }
 
   bool blockedAt(int cx, int cy) const {
-    return !inside(cx, cy) || blocked[index(cx, cy)] != 0;
+    if (!inside(cx, cy)) return true;
+    const size_t p = index(cx, cy);
+    return p >= blocked.size() || blocked[p] != 0;
   }
 
-  float costAt(int cx, int cy) const { return cost[index(cx, cy)]; }
+  float costAt(int cx, int cy) const {
+    if (!inside(cx, cy)) return 1.0f;
+    const size_t p = index(cx, cy);
+    return p < cost.size() ? cost[p] : 1.0f;
+  }
 
   bool worldToCell(double x, double y, int* cx, int* cy) const {
     *cx = static_cast<int>(std::floor((x - origin_x) / resolution));
@@ -62,11 +68,13 @@ struct EsdfField {
   bool empty() const { return width <= 0 || height <= 0 || data.empty(); }
 
   float at(double x, double y) const {
-    if (empty()) return max_distance;
+    if (empty() || !(resolution > 0.0)) return max_distance;
     const int cx = static_cast<int>(std::floor((x - origin_x) / resolution));
     const int cy = static_cast<int>(std::floor((y - origin_y) / resolution));
     if (cx < 0 || cy < 0 || cx >= width || cy >= height) return max_distance;
-    return data[static_cast<size_t>(cy) * static_cast<size_t>(width) + static_cast<size_t>(cx)];
+    const size_t p = static_cast<size_t>(cy) * static_cast<size_t>(width) +
+                     static_cast<size_t>(cx);
+    return p < data.size() ? data[p] : max_distance;
   }
 };
 

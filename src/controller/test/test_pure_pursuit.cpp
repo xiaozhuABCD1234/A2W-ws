@@ -40,6 +40,17 @@ TEST(PurePursuit, EmptyPathStops) {
   EXPECT_FALSE(output.reached);
 }
 
+TEST(PurePursuit, AcceptsBarePointList) {
+  controller::Path2D path;
+  path.points = straightPath(6.0).points;
+  controller::Pose2D pose;
+  pose.x = 0.4;
+  const controller::PurePursuitOutput output =
+      controller::purePursuit(path, pose, 0.6, 1.0, controller::PurePursuitParams{});
+  EXPECT_GT(output.command.linear, 0.3);
+  EXPECT_FALSE(output.rotating);
+}
+
 TEST(PurePursuit, DrivesStraightAlongPath) {
   const controller::Path2D path = straightPath(6.0);
   controller::Pose2D pose;

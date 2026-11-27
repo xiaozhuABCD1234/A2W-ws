@@ -9,6 +9,9 @@ PurePursuitOutput purePursuit(const Path2D& path, const Pose2D& pose, double spe
                               double speed_scale, const PurePursuitParams& params) {
   PurePursuitOutput output;
   if (path.points.size() < 2) return output;
+  if (path.arc.size() != path.points.size() || path.yaw.size() != path.points.size()) {
+    return purePursuit(makePath(path.points), pose, speed_reference, speed_scale, params);
+  }
 
   const Point robot{pose.x, pose.y};
   const std::size_t closest = nearestIndex(path, robot, 0, 0);
