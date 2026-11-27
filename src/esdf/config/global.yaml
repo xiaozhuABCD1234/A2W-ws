@@ -7,8 +7,11 @@
     query_response_topic: /esdf/global/query_distance
     points_topic: /esdf/global/points
     publish_points: true
-    point_stride: 6
+    point_stride: 2
+    points_max: 60000
+    points_period_ms: 500
     esdf.resolution: 0.10
     esdf.max_distance: 10.0
     esdf.occupied_threshold: 65
     esdf.unknown_is_obstacle: false
+    esdf.downsample: 1

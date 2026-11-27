@@ -67,57 +67,86 @@ class EsdfNode : public rclcpp::Node {
     params_.occupied_threshold = param<int>("esdf.occupied_threshold", params_.occupied_threshold);
     params_.unknown_is_obstacle =
         param<bool>("esdf.unknown_is_obstacle", params_.unknown_is_obstacle);
+    downsample_ = param<int>("esdf.downsample", downsample_);
+    points_period_ms_ = param<int>("points_period_ms", points_period_ms_);
+    points_max_ = param<int>("points_max", points_max_);
+    downsample_ = std::max(1, downsample_);
+    points_period_ms_ = std::max(0, points_period_ms_);
+    points_max_ = std::max(1000, points_max_);
     point_stride_ = std::max(1, point_stride_);
     params_.max_distance = std::max(0.1, params_.max_distance);
   }
 
   void sourceCallback(const nav_msgs::msg::OccupancyGrid::ConstSharedPtr& msg) {
-    const size_t width = msg->info.width;
-    const size_t height = msg->info.height;
-    if (width == 0 || height == 0 || msg->data.size() < width * height) return;
+    const int source_width = static_cast<int>(msg->info.width);
+    const int source_height = static_cast<int>(msg->info.height);
+    if (source_width <= 0 || source_height <= 0 ||
+        msg->data.size() < static_cast<size_t>(source_width) * static_cast<size_t>(source_height)) {
+      return;
+    }
 
     EdtParams params = params_;
-    params.resolution =
+    const double source_resolution =
         msg->info.resolution > 0.0f ? static_cast<double>(msg->info.resolution) : params.resolution;
+    const int step = downsample_;
+    const int width = (source_width + step - 1) / step;
+    const int height = (source_height + step - 1) / step;
+    params.resolution = source_resolution * step;
 
     const auto start = std::chrono::steady_clock::now();
-    std::vector<float> distance;
-    distanceTransform(msg->data, static_cast<int>(width), static_cast<int>(height), params,
-                      &distance);
-    std::vector<float> gradient_x;
-    std::vector<float> gradient_y;
-    gradient(distance, static_cast<int>(width), static_cast<int>(height), params.resolution,
-             params.max_distance, &gradient_x, &gradient_y);
-    const double elapsed_ms =
-        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-
+    std::vector<int8_t> reduced(static_cast<size_t>(width) * static_cast<size_t>(height), -1);
     size_t obstacles = 0;
     size_t free_cells = 0;
-    for (const int8_t value : msg->data) {
-      if (value >= params.occupied_threshold) {
-        ++obstacles;
-      } else if (value >= 0) {
-        ++free_cells;
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        int8_t value = -1;
+        for (int oy = 0; oy < step; ++oy) {
+          const int sy = y * step + oy;
+          if (sy >= source_height) break;
+          for (int ox = 0; ox < step; ++ox) {
+            const int sx = x * step + ox;
+            if (sx >= source_width) break;
+            const int8_t cell = msg->data[static_cast<size_t>(sy) *
+                                              static_cast<size_t>(source_width) +
+                                          static_cast<size_t>(sx)];
+            if (cell >= params.occupied_threshold) {
+              value = cell;
+              break;
+            }
+            if (cell >= 0 && value < 0) value = 0;
+          }
+          if (value >= params.occupied_threshold) break;
+        }
+        reduced[static_cast<size_t>(y) * static_cast<size_t>(width) + static_cast<size_t>(x)] =
+            value;
+        if (value >= params.occupied_threshold) {
+          ++obstacles;
+        } else if (value >= 0) {
+          ++free_cells;
+        }
       }
     }
 
+    std::vector<float> distance;
+    distanceTransform(reduced, width, height, params, &distance);
+    const double elapsed_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+
+    geometry_msgs::msg::Pose origin = msg->info.origin;
+    origin.position.z = 0.0;
+    origin.orientation.w = 1.0;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       distance_ = std::move(distance);
-      gradient_x_ = std::move(gradient_x);
-      gradient_y_ = std::move(gradient_y);
-      width_ = static_cast<int>(width);
-      height_ = static_cast<int>(height);
+      width_ = width;
+      height_ = height;
       resolution_ = params.resolution;
-      origin_x_ = msg->info.origin.position.x;
-      origin_y_ = msg->info.origin.position.y;
+      origin_x_ = origin.position.x;
+      origin_y_ = origin.position.y;
       frame_id_ = msg->header.frame_id;
       stamp_ = rclcpp::Time(msg->header.stamp);
-      std::memcpy(image_.data.data(), distance_.data(),
-                  image_.data.size() * sizeof(float));
     }
-
-    publish(msg->info.origin, obstacles, free_cells, elapsed_ms);
+    publish(origin, obstacles, free_cells, elapsed_ms);
   }
 
   void publish(const geometry_msgs::msg::Pose& origin, size_t obstacles, size_t free_cells,
@@ -148,7 +177,13 @@ class EsdfNode : public rclcpp::Node {
     }
     image_pub_->publish(image);
     meta_pub_->publish(meta);
-    if (publish_points_ && points_pub_) publishPoints(image.header);
+    if (publish_points_ && points_pub_) {
+      const double now_sec = this->now().seconds();
+      if (points_period_ms_ == 0 || now_sec - last_points_sec_ >= points_period_ms_ / 1000.0) {
+        last_points_sec_ = now_sec;
+        publishPoints(image.header);
+      }
+    }
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
                          "esdf %dx%d res=%.3f obstacles=%zu free=%zu time=%.1f ms",
                          static_cast<int>(meta.width), static_cast<int>(meta.height),
@@ -159,7 +194,11 @@ class EsdfNode : public rclcpp::Node {
     pcl::PointCloud<pcl::PointXYZI> cloud;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      const int stride = point_stride_;
+      int stride = point_stride_;
+      while (stride < width_ && stride < height_ &&
+             (width_ / stride + 1) * (height_ / stride + 1) > points_max_) {
+        ++stride;
+      }
       for (int y = 0; y < height_; y += stride) {
         for (int x = 0; x < width_; x += stride) {
           const size_t p = static_cast<size_t>(y) * static_cast<size_t>(width_) +
@@ -204,11 +243,13 @@ class EsdfNode : public rclcpp::Node {
   std::string points_topic_ = "/esdf/local/points";
   bool publish_points_ = true;
   int point_stride_ = 2;
+  int downsample_ = 1;
+  int points_period_ms_ = 500;
+  int points_max_ = 60000;
+  double last_points_sec_ = 0.0;
 
   std::mutex mutex_;
   std::vector<float> distance_;
-  std::vector<float> gradient_x_;
-  std::vector<float> gradient_y_;
   int width_ = 0;
   int height_ = 0;
   double resolution_ = 0.05;
@@ -216,7 +257,6 @@ class EsdfNode : public rclcpp::Node {
   double origin_y_ = 0.0;
   std::string frame_id_ = "map";
   rclcpp::Time stamp_{0, 0, RCL_ROS_TIME};
-  sensor_msgs::msg::Image image_;
 
   rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr source_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr query_sub_;

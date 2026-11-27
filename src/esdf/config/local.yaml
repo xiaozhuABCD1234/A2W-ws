@@ -8,7 +8,10 @@
     points_topic: /esdf/local/points
     publish_points: true
     point_stride: 2
+    points_max: 20000
+    points_period_ms: 500
     esdf.resolution: 0.05
     esdf.max_distance: 3.0
     esdf.occupied_threshold: 65
     esdf.unknown_is_obstacle: false
+    esdf.downsample: 1
