@@ -1,0 +1,14 @@
+/**:
+  ros__parameters:
+    source_topic: /occupancy_map_2d/map
+    distance_topic: /esdf/global/distance
+    meta_topic: /esdf/global/meta
+    query_topic: /esdf/global/query
+    query_response_topic: /esdf/global/query_distance
+    points_topic: /esdf/global/points
+    publish_points: false
+    point_stride: 4
+    esdf.resolution: 0.10
+    esdf.max_distance: 10.0
+    esdf.occupied_threshold: 65
+    esdf.unknown_is_obstacle: false

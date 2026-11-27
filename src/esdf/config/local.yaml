@@ -1,0 +1,14 @@
+/**:
+  ros__parameters:
+    source_topic: /costmap_2d/grid
+    distance_topic: /esdf/local/distance
+    meta_topic: /esdf/local/meta
+    query_topic: /esdf/local/query
+    query_response_topic: /esdf/local/query_distance
+    points_topic: /esdf/local/points
+    publish_points: true
+    point_stride: 2
+    esdf.resolution: 0.05
+    esdf.max_distance: 3.0
+    esdf.occupied_threshold: 65
+    esdf.unknown_is_obstacle: false
