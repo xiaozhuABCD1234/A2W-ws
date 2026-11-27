@@ -962,11 +962,16 @@ class BackendNode : public rclcpp::Node {
       }
 
       geometry_msgs::msg::TransformStamped tf_msg = tf2::eigenToTransform(correction);
-      // TF 用墙钟打戳：point_lio 先发点云后发 odom，按 odom 打戳会报 extrapolation into the future；
-      // map->camera_init 是缓变量，墙钟打戳无损精度。
-      tf_msg.header.stamp = now();
       tf_msg.header.frame_id = params_.world_frame;
       tf_msg.child_frame_id = params_.odom_frame;
+      // 三戳:odom 时刻(与点云同戳)/ odom+0.15 s(point_lio 的 lidar_end_time 领先
+      // bag 时钟一帧,接收端 tf 缓存的"最新"常落在点云时戳之前,补一个前向戳才查得到)
+      // / 墙钟(点云先发、odom 后到时不至于 extrapolation into the future)。
+      tf_msg.header.stamp = toRosTime(stamp);
+      tf_broadcaster_->sendTransform(tf_msg);
+      tf_msg.header.stamp = toRosTime(stamp + 0.15);
+      tf_broadcaster_->sendTransform(tf_msg);
+      tf_msg.header.stamp = now();
       tf_broadcaster_->sendTransform(tf_msg);
 
       if (params_.output.publish_odom) {
