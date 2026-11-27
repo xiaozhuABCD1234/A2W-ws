@@ -11,16 +11,16 @@ def generate_launch_description():
         'use_sim_time', default_value='false')
 
     mid360_driver_node = Node(
-        package="mid360_driver",
-        executable="mid360_driver_node",
-        name="mid360_driver",
-        output="screen",
+        package='mid360_driver',
+        executable='mid360_driver_node',
+        name='mid360_driver',
+        output='screen',
         parameters=[
             PathJoinSubstitution(
                 [
-                    FindPackageShare("mid360_driver"),
-                    "config",
-                    "param.yaml",
+                    FindPackageShare('mid360_driver'),
+                    'config',
+                    'param.yaml',
                 ]
             ),
             {'use_sim_time': ParameterValue(

@@ -12,7 +12,7 @@ set(CMAKE_COLOR_DIAGNOSTICS ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # set build type
-if (NOT CMAKE_BUILD_TYPE)
+if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
@@ -64,9 +64,13 @@ rclcpp_components_register_node(${PROJECT_NAME}
 
 if(BUILD_TESTING)
     find_package(ament_lint_auto REQUIRED)
+    # 本包为上游驱动改造版,保留原有格式;
+    # cpplint 不能正确解析本文件使用的 C++20 [[unlikely]] 属性,
+    # 会把带花括号的 if 误报为缺花括号,因此不纳入 lint 门禁。
     list(APPEND AMENT_LINT_AUTO_EXCLUDE
         ament_cmake_copyright
         ament_cmake_uncrustify
+        ament_cmake_cpplint
     )
     ament_lint_auto_find_test_dependencies()
 endif()
