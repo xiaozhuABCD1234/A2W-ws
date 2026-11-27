@@ -5,9 +5,9 @@
     nonground_topic: /ground_segmentation/nonground
     map_topic: /occupancy_map_2d/map
     runtime.stamp_tolerance: 0.05
-    runtime.publish_period_ms: 1000
+    runtime.publish_period_ms: 2000
     runtime.tf_timeout_ms: 100
-    grid.resolution: 0.05
+    grid.resolution: 0.10
     grid.width: 240.0
     grid.height: 240.0
     grid.origin_x: -120.0
