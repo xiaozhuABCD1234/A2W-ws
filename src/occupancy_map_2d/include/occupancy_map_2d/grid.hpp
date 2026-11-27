@@ -30,6 +30,9 @@ struct GridParams {
   double min_log_odds = -5.0;
   double max_log_odds = 5.0;
   double occupied_probability = 0.65;
+  double ray_block_probability = 0.90;
+  double free_ray_occupied_delta = 0.30;
+  int occupied_patience_frames = 5;
   int min_component_cells = 3;
 
   double raycast_dedupe_deg = 0.5;
@@ -40,6 +43,9 @@ struct GridSnapshot {
   double origin_x = 0.0;
   double origin_y = 0.0;
   double occupied_probability = 0.65;
+  double ray_block_probability = 0.90;
+  double free_ray_occupied_delta = 0.30;
+  int occupied_patience_frames = 5;
   int min_component_cells = 3;
   int width = 0;
   int height = 0;
@@ -78,6 +84,7 @@ class OccupancyGrid2D {
   void raycast(int start_x, int start_y, int end_x, int end_y, bool clear_endpoint,
                const std::vector<uint8_t>* blocked);
   void addFree(int x, int y);
+  void erode(int x, int y);
   void addOccupied(int x, int y);
   const std::vector<int>& dedupeGroundRays(int sensor_x, int sensor_y);
 
@@ -89,12 +96,17 @@ class OccupancyGrid2D {
   float occupied_delta_ = 0.0f;
   float min_log_odds_ = 0.0f;
   float max_log_odds_ = 0.0f;
+  float ray_block_threshold_ = 0.0f;
+  float free_ray_occupied_delta_ = 0.30f;
+  uint32_t frame_ = 0;
+  uint32_t occupied_patience_ = 5;
   double max_range2_ = 0.0;
 
   std::vector<float> log_odds_;
   std::vector<uint8_t> observed_;
   std::vector<uint8_t> ground_mask_;
   std::vector<uint8_t> obstacle_mask_;
+  std::vector<uint32_t> obstacle_frame_;
 
   std::vector<int> observed_cells_;
   std::vector<int> ground_touched_;

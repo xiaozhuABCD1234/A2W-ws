@@ -71,6 +71,57 @@ TEST(OccupancyGrid2D, ObstacleIsOccupiedAndRayIsFree) {
   EXPECT_EQ(grid.occupiedCells(), 1u);
 }
 
+TEST(OccupancyGrid2D, WeakObstacleDoesNotBlockRays) {
+  GridParams params = makeParams();
+  params.min_component_cells = 1;
+  OccupancyGrid2D grid(params);
+  const auto ground = makeCloud({{5.0, 0.0, 0.0}});
+  const auto obstacle = makeCloud({{3.0, 0.0, 0.5}});
+  const auto empty = makeCloud({});
+
+  grid.update(ground, obstacle, makeSensor());
+  EXPECT_EQ(grid.occupiedCells(), 1u) << "单帧观测应算占据";
+
+  for (int frame = 0; frame < 12; ++frame) grid.update(ground, empty, makeSensor());
+
+  const auto map = grid.message("map", rclcpp::Time(0, 0));
+  EXPECT_EQ(grid.occupiedCells(), 0u) << "低置信占据格应被空闲射线擦回";
+  EXPECT_NE(cellValue(map, kObstacleCellX, kSensorCell), -1) << "弱占据不应挡住射线";
+  EXPECT_NE(cellValue(map, kObstacleCellX + 20, kSensorCell), -1) << "射线应穿过该格继续刷自由空间";
+}
+
+TEST(OccupancyGrid2D, StrongObstacleBlocksRays) {
+  GridParams params = makeParams();
+  params.min_component_cells = 1;
+  OccupancyGrid2D grid(params);
+  const auto ground = makeCloud({{5.0, 0.0, 0.0}});
+  const auto obstacle = makeCloud({{3.0, 0.0, 0.5}});
+
+  for (int frame = 0; frame < 6; ++frame) grid.update(ground, obstacle, makeSensor());
+
+  const auto map = grid.message("map", rclcpp::Time(0, 0));
+  EXPECT_EQ(cellValue(map, kObstacleCellX, kSensorCell), 99) << "反复观测应到高置信";
+  EXPECT_EQ(cellValue(map, kObstacleCellX + 20, kSensorCell), -1) << "高置信障碍后面的射线要截断";
+}
+
+TEST(OccupancyGrid2D, StaleHighConfidenceCellIsEroded) {
+  GridParams params = makeParams();
+  params.min_component_cells = 1;
+  OccupancyGrid2D grid(params);
+  const auto ground = makeCloud({{5.0, 0.0, 0.0}});
+  const auto obstacle = makeCloud({{3.0, 0.0, 0.5}});
+  const auto empty = makeCloud({});
+
+  for (int frame = 0; frame < 5; ++frame) grid.update(ground, obstacle, makeSensor());
+  EXPECT_EQ(cellValue(grid.message("map", rclcpp::Time(0, 0)), kObstacleCellX + 20, kSensorCell), -1);
+
+  for (int frame = 0; frame < 20; ++frame) grid.update(ground, empty, makeSensor());
+
+  const auto map = grid.message("map", rclcpp::Time(0, 0));
+  EXPECT_LT(cellValue(map, kObstacleCellX, kSensorCell), 65) << "旧的高置信格应被穿透射线蚀掉";
+  EXPECT_NE(cellValue(map, kObstacleCellX + 20, kSensorCell), -1) << "蚀掉后射线应继续刷自由空间";
+}
+
 TEST(OccupancyGrid2D, ClearResetsCellsAndFrameMasks) {
   OccupancyGrid2D grid(makeParams());
   const auto ground = makeCloud({{5.0, 0.0, 0.0}});

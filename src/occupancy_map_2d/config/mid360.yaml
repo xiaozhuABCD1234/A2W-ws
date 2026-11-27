@@ -7,11 +7,11 @@
     runtime.stamp_tolerance: 0.05
     runtime.publish_period_ms: 1000
     runtime.tf_timeout_ms: 100
-    grid.resolution: 0.10
-    grid.width: 120.0
-    grid.height: 120.0
-    grid.origin_x: -60.0
-    grid.origin_y: -60.0
+    grid.resolution: 0.05
+    grid.width: 240.0
+    grid.height: 240.0
+    grid.origin_x: -120.0
+    grid.origin_y: -120.0
     grid.max_range: 20.0
     grid.obstacle_min_height: -0.50
     grid.obstacle_max_height: 1.0
@@ -20,5 +20,8 @@
     grid.min_log_odds: -5.0
     grid.max_log_odds: 5.0
     grid.occupied_probability: 0.65
+    grid.ray_block_probability: 0.90
+    grid.free_ray_occupied_delta: 0.30
+    grid.occupied_patience_frames: 5
     grid.min_component_cells: 3
     grid.raycast_dedupe_deg: 0.5

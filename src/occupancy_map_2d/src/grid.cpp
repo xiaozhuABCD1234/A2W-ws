@@ -28,7 +28,13 @@ OccupancyGrid2D::OccupancyGrid2D(const GridParams& params) : params_(params) {
   observed_.assign(cells, 0);
   ground_mask_.assign(cells, 0);
   obstacle_mask_.assign(cells, 0);
+  obstacle_frame_.assign(cells, 0);
   occupied_threshold_ = logit(params_.occupied_probability);
+  ray_block_threshold_ = logit(std::max(params_.occupied_probability,
+                                        params_.ray_block_probability));
+  free_ray_occupied_delta_ =
+      static_cast<float>(std::max(0.0, params_.free_ray_occupied_delta));
+  occupied_patience_ = static_cast<uint32_t>(std::max(0, params_.occupied_patience_frames));
   free_delta_ = static_cast<float>(params_.free_log_odds);
   occupied_delta_ = static_cast<float>(params_.occupied_log_odds);
   min_log_odds_ = static_cast<float>(params_.min_log_odds);
@@ -45,6 +51,7 @@ OccupancyGrid2D::OccupancyGrid2D(const GridParams& params) : params_(params) {
 void OccupancyGrid2D::clear() {
   std::fill(log_odds_.begin(), log_odds_.end(), 0.0f);
   std::fill(observed_.begin(), observed_.end(), 0);
+  std::fill(obstacle_frame_.begin(), obstacle_frame_.end(), 0u);
 
   for (int cell : ground_touched_) ground_mask_[cell] = 0;
   for (int cell : obstacle_touched_) obstacle_mask_[cell] = 0;
@@ -82,6 +89,17 @@ void OccupancyGrid2D::addFree(int x, int y) {
   ++version_;
 }
 
+void OccupancyGrid2D::erode(int x, int y) {
+  if (x < 0 || y < 0 || x >= width_ || y >= height_) return;
+  const size_t position = static_cast<size_t>(y) * static_cast<size_t>(width_) + static_cast<size_t>(x);
+  const float before = log_odds_[position];
+  float after = before - free_ray_occupied_delta_;
+  after = after < min_log_odds_ ? min_log_odds_ : (after > max_log_odds_ ? max_log_odds_ : after);
+  log_odds_[position] = after;
+  if (before >= occupied_threshold_ && after < occupied_threshold_) --occupied_cells_;
+  ++version_;
+}
+
 void OccupancyGrid2D::addOccupied(int x, int y) {
   if (x < 0 || y < 0 || x >= width_ || y >= height_) return;
   const size_t position = static_cast<size_t>(y) * static_cast<size_t>(width_) + static_cast<size_t>(x);
@@ -89,6 +107,7 @@ void OccupancyGrid2D::addOccupied(int x, int y) {
   float after = before + occupied_delta_;
   after = after < min_log_odds_ ? min_log_odds_ : (after > max_log_odds_ ? max_log_odds_ : after);
   log_odds_[position] = after;
+  obstacle_frame_[position] = frame_;
   if (before < occupied_threshold_ && after >= occupied_threshold_) ++occupied_cells_;
   if (!observed_[position]) {
     observed_[position] = 1;
@@ -110,7 +129,12 @@ void OccupancyGrid2D::raycast(int start_x, int start_y, int end_x, int end_y,
     if (blocked != nullptr) {
       const size_t position = static_cast<size_t>(y) * static_cast<size_t>(width_) +
                               static_cast<size_t>(x);
-      if ((*blocked)[position] || log_odds_[position] >= occupied_threshold_) break;
+      if ((*blocked)[position]) break;
+      if (log_odds_[position] >= occupied_threshold_) {
+        if (frame_ - obstacle_frame_[position] < occupied_patience_) break;
+        erode(x, y);
+        if (log_odds_[position] >= ray_block_threshold_) break;
+      }
     }
     const bool endpoint = x == end_x && y == end_y;
     if (!endpoint || clear_endpoint) addFree(x, y);
@@ -169,6 +193,7 @@ void OccupancyGrid2D::update(const PointCloudT& ground, const PointCloudT& nongr
   int sensor_y = 0;
   const auto& sensor = sensor_to_map.translation();
   if (!sensor.allFinite() || !index(sensor.x(), sensor.y(), &sensor_x, &sensor_y)) return;
+  ++frame_;
 
   for (int cell : ground_touched_) ground_mask_[cell] = 0;
   for (int cell : obstacle_touched_) obstacle_mask_[cell] = 0;

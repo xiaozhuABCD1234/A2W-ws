@@ -91,6 +91,12 @@ class OccupancyMap2DNode : public rclcpp::Node {
     params_.max_log_odds = param<double>("grid.max_log_odds", params_.max_log_odds);
     params_.occupied_probability =
         param<double>("grid.occupied_probability", params_.occupied_probability);
+    params_.ray_block_probability =
+        param<double>("grid.ray_block_probability", params_.ray_block_probability);
+    params_.free_ray_occupied_delta =
+        param<double>("grid.free_ray_occupied_delta", params_.free_ray_occupied_delta);
+    params_.occupied_patience_frames =
+        param<int>("grid.occupied_patience_frames", params_.occupied_patience_frames);
     params_.min_component_cells =
         param<int>("grid.min_component_cells", params_.min_component_cells);
     params_.raycast_dedupe_deg =
