@@ -179,7 +179,8 @@ class EsdfNode : public rclcpp::Node {
     meta_pub_->publish(meta);
     if (publish_points_ && points_pub_) {
       const double now_sec = this->now().seconds();
-      if (points_period_ms_ == 0 || now_sec - last_points_sec_ >= points_period_ms_ / 1000.0) {
+      const double period_sec = static_cast<double>(points_period_ms_) / 1000.0;
+      if (points_period_ms_ == 0 || now_sec - last_points_sec_ >= 0.99 * period_sec) {
         last_points_sec_ = now_sec;
         publishPoints(image.header);
       }
