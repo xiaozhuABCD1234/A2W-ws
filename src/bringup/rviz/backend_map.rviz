@@ -62,6 +62,53 @@ Visualization Manager:
       Alpha: 0.7
       Color Scheme: map
 
+    - Class: rviz_default_plugins/Map
+      Name: LocalCostmap
+      Enabled: true
+      Topic:
+        Value: /costmap_2d/grid
+        Depth: 5
+        Durability Policy: Transient Local
+        Reliability Policy: Reliable
+      Alpha: 0.6
+      Color Scheme: costmap
+
+    - Class: rviz_default_plugins/PointCloud2
+      Name: ESDF_local
+      Enabled: true
+      Topic:
+        Value: /esdf/local/points
+        Depth: 2
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Style: Points
+      Size (Pixels): 4
+      Color Transformer: Intensity
+      Color: 255; 255; 255
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds: true
+      Axis: Z
+      Position Transformer: XYZ
+      Use Fixed Frame: true
+
+    - Class: rviz_default_plugins/PointCloud2
+      Name: ESDF_global
+      Enabled: false
+      Topic:
+        Value: /esdf/global/points
+        Depth: 2
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+      Style: Points
+      Size (Pixels): 3
+      Color Transformer: Intensity
+      Color: 255; 255; 255
+      Autocompute Intensity Bounds: true
+      Autocompute Value Bounds: true
+      Axis: Z
+      Position Transformer: XYZ
+      Use Fixed Frame: true
+
     # 注意:这里**故意不再放** /cloud_registered(frame=camera_init)与 /path。
     # Fixed Frame 是 map 时,这类 camera_init 系的显示每个都要 map->camera_init,
     # 而 point_lio 先发点云、后发 odom,点云到达那一刻 TF 还没追上,rviz 状态栏就
