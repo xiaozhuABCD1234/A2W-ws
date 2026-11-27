@@ -117,9 +117,14 @@ bool PoseGraph::optimize(std::vector<Keyframe>& keyframes,
         makeInformation(params_.odom_trans_sigma, deg2rad(params_.odom_rot_sigma_deg)));
     const auto loop_base = gtsam::noiseModel::Gaussian::Information(
         makeInformation(params_.loop_trans_sigma, deg2rad(params_.loop_rot_sigma_deg)));
+    const auto weak_loop_base = gtsam::noiseModel::Gaussian::Information(
+        makeInformation(params_.loop_trans_sigma * params_.weak_loop_sigma_scale,
+                        deg2rad(params_.loop_rot_sigma_deg * params_.weak_loop_sigma_scale)));
     // 鲁棒核作用于白化残差，huber_delta 语义与原 Ceres HuberLoss 一致。
     const auto loop_noise = gtsam::noiseModel::Robust::Create(
         gtsam::noiseModel::mEstimator::Huber::Create(params_.huber_delta), loop_base);
+    const auto weak_loop_noise = gtsam::noiseModel::Robust::Create(
+        gtsam::noiseModel::mEstimator::Huber::Create(params_.huber_delta), weak_loop_base);
 
     // 相邻关键帧 odom 边：Z = pose_raw_i^{-1} * pose_raw_{i+1}
     for (std::size_t i = 0; i + 1 < n; ++i) {
@@ -137,7 +142,8 @@ bool PoseGraph::optimize(std::vector<Keyframe>& keyframes,
       if (it_from == id_to_index.end() || it_to == id_to_index.end()) continue;
       if (it_from->second == it_to->second) continue;
       graph.emplace_shared<gtsam::BetweenFactor<gtsam::Pose3>>(
-          keyOf(loops[k].from), keyOf(loops[k].to), toGtsam(loops[k].T_from_to), loop_noise);
+          keyOf(loops[k].from), keyOf(loops[k].to), toGtsam(loops[k].T_from_to),
+          loops[k].weak ? weak_loop_noise : loop_noise);
     }
 
     gtsam::LevenbergMarquardtParams lm;

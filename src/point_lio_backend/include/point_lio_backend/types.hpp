@@ -50,10 +50,13 @@ struct IcpParams {
   int max_match_points = 1500;         // 降采样后再截断，控制单次 GICP 点数
   bool stop_at_first = true;           // 候选按 SC 距离升序，命中第一个通过校验的就返回
   double time_budget_ms = 400.0;       // 单次回环检测总预算；超了就放弃本次（0 = 不限）
-  double max_fitness = 0.10;         // GICP 均方误差
+  double max_fitness = 0.10;
+  double max_fitness_weak = 0.45;
+  double min_inlier_ratio_weak = 0.90;
   double min_inlier_ratio = 0.6;
   double max_correction_trans = 5.0; // m
   double max_correction_rot_deg = 30.0;
+  bool lock_roll_pitch = true;
 };
 
 struct GraphParams {
@@ -61,6 +64,7 @@ struct GraphParams {
   double odom_rot_sigma_deg = 0.5;
   double loop_trans_sigma = 0.10;    // m
   double loop_rot_sigma_deg = 1.5;
+  double weak_loop_sigma_scale = 3.0;
   double huber_delta = 1.0;          // 鲁棒核阈值（白化残差单位）
   int max_iterations = 50;           // LM 最大迭代
   bool pcm_enabled = true;           // 回环 PCM-lite 两两一致性筛选
@@ -113,6 +117,8 @@ struct LoopConstraint {
   Eigen::Isometry3d T_from_to = Eigen::Isometry3d::Identity();
   double fitness = 0.0;
   double inlier_ratio = 0.0;
+  double raw_tilt_deg = 0.0;
+  bool weak = false;
   bool active = true;
 };
 

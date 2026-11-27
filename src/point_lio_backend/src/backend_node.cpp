@@ -543,8 +543,9 @@ class BackendNode : public rclcpp::Node {
 
       if (loop.has_value()) {
         RCLCPP_INFO(get_logger(),
-                    "loop detected: from=%d to=%d fitness=%.3f inliers=%.2f",
-                    loop->from, loop->to, loop->fitness, loop->inlier_ratio);
+                    "loop detected: from=%d to=%d fitness=%.3f inliers=%.2f tilt=%.2f%s",
+                    loop->from, loop->to, loop->fitness, loop->inlier_ratio,
+                    loop->raw_tilt_deg, loop->weak ? " weak" : "");
       }
 
       // 契约：每个新关键帧都发一次 map 系 path；优化后再重发。

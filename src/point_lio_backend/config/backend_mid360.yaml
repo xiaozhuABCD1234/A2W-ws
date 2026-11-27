@@ -43,20 +43,24 @@
     icp.max_iterations: 20
     icp.coarse_iterations: 10
     icp.match_voxel: 0.35
-    icp.max_match_points: 1500
+    icp.max_match_points: 2500
     icp.stop_at_first: true
     # 单次 detect 总预算(含 SC + 全部 GICP),超时放弃本次(0 = 不限)
     icp.time_budget_ms: 400.0
     icp.max_fitness: 0.10
+    icp.max_fitness_weak: 0.45
+    icp.min_inlier_ratio_weak: 0.90
     icp.min_inlier_ratio: 0.6
     icp.max_correction_trans: 5.0
     icp.max_correction_rot_deg: 30.0
+    icp.lock_roll_pitch: true
 
     # ── 位姿图
     graph.odom_trans_sigma: 0.02
     graph.odom_rot_sigma_deg: 0.5
     graph.loop_trans_sigma: 0.10
     graph.loop_rot_sigma_deg: 1.5
+    graph.weak_loop_sigma_scale: 3.0
     # 量纲:残差已按 1/σ 加权(平移 ×10/m),Huber δ 同单位。10 即 ~1 m 内二次、之外线性。
     graph.huber_delta: 10.0
     graph.max_iterations: 50

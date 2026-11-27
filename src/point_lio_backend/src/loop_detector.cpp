@@ -289,10 +289,25 @@ std::optional<LoopConstraint> LoopDetector::detect(
 
     Eigen::Isometry3d final = Eigen::Isometry3d::Identity();
     final.matrix() = gicp.getFinalTransformation().cast<double>();
+    const double fitness = gicp.getFitnessScore();
+
+    double raw_tilt_deg = 0.0;
+    {
+      const Eigen::Matrix3d& rotation = final.linear();
+      const double roll_deg = std::atan2(rotation(2, 1), rotation(2, 2)) * 180.0 / M_PI;
+      const double pitch_deg =
+          std::asin(std::max(-1.0, std::min(1.0, -rotation(2, 0)))) * 180.0 / M_PI;
+      raw_tilt_deg = std::sqrt(roll_deg * roll_deg + pitch_deg * pitch_deg);
+      if (icp_params_.lock_roll_pitch) {
+        const double yaw = std::atan2(rotation(1, 0), rotation(0, 0));
+        final.linear() = Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+      }
+    }
 
     // fitness / 内点率 / 修正量门限都只在精配准之后判定。
-    const double fitness = gicp.getFitnessScore();
-    if (!std::isfinite(fitness) || fitness > icp_params_.max_fitness) {
+    const bool weak_candidate =
+        fitness > icp_params_.max_fitness && fitness <= icp_params_.max_fitness_weak;
+    if (!std::isfinite(fitness) || (fitness > icp_params_.max_fitness && !weak_candidate)) {
       continue;
     }
 
@@ -301,7 +316,7 @@ std::optional<LoopConstraint> LoopDetector::detect(
     pcl::transformPointCloud(*current_match, transformed, final.matrix().cast<float>());
     pcl::KdTreeFLANN<PointT> target_tree;
     target_tree.setInputCloud(target_match);
-    const double max_sq = icp_params_.max_correspondence * icp_params_.max_correspondence;
+    const double max_sq = fine_correspondence * fine_correspondence;
     size_t inliers = 0;
     std::vector<int> nn_index(1);
     std::vector<float> nn_distance(1);
@@ -313,7 +328,10 @@ std::optional<LoopConstraint> LoopDetector::detect(
     }
     const double inlier_ratio =
         static_cast<double>(inliers) / static_cast<double>(transformed.points.size());
-    if (inlier_ratio < icp_params_.min_inlier_ratio) {
+    const double inlier_gate =
+        weak_candidate ? std::max(icp_params_.min_inlier_ratio, icp_params_.min_inlier_ratio_weak)
+                       : icp_params_.min_inlier_ratio;
+    if (inlier_ratio < inlier_gate) {
       continue;
     }
 
@@ -327,7 +345,9 @@ std::optional<LoopConstraint> LoopDetector::detect(
       continue;
     }
 
-    if (fitness < best_fitness) {
+    const double ranked = weak_candidate ? fitness + 10.0 : fitness;
+    if (ranked < best_fitness) {
+      best_fitness = ranked;
       best_fitness = fitness;
       LoopConstraint constraint;
       constraint.from = keyframe.id;
@@ -335,6 +355,8 @@ std::optional<LoopConstraint> LoopDetector::detect(
       constraint.T_from_to = final;
       constraint.fitness = fitness;
       constraint.inlier_ratio = inlier_ratio;
+      constraint.raw_tilt_deg = raw_tilt_deg;
+      constraint.weak = weak_candidate;
       constraint.active = true;
       best = constraint;
       // 候选按 SC 距离升序，首个通过校验的通常即正确回环
