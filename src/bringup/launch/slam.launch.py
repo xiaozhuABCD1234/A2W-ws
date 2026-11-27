@@ -131,6 +131,14 @@ def generate_launch_description():
     occupancy_map_2d_arg = DeclareLaunchArgument(
         'occupancy_map_2d', default_value='true')
 
+    costmap_arg = DeclareLaunchArgument(
+        'costmap', default_value='true',
+        description='是否启动 costmap_2d(滚动窗口局部代价地图,0.05 m,Z-aware DDA)')
+
+    esdf_arg = DeclareLaunchArgument(
+        'esdf', default_value='true',
+        description='是否启动 esdf(Felzenszwalb 距离场,供规划启发式与碰撞半径查询)')
+
     use_sim_time_arg = DeclareLaunchArgument(
         'use_sim_time', default_value='false')
 
@@ -195,6 +203,28 @@ def generate_launch_description():
             'use_sim_time': LaunchConfiguration('use_sim_time'),
         }.items(),
         condition=IfCondition(LaunchConfiguration('occupancy_map_2d')),
+    )
+
+    costmap_2d = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(PathJoinSubstitution([
+            FindPackageShare('costmap_2d'),
+            'launch', 'costmap_2d.launch.py',
+        ])),
+        launch_arguments={
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+        }.items(),
+        condition=IfCondition(LaunchConfiguration('costmap')),
+    )
+
+    esdf = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(PathJoinSubstitution([
+            FindPackageShare('esdf'),
+            'launch', 'esdf.launch.py',
+        ])),
+        launch_arguments={
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+        }.items(),
+        condition=IfCondition(LaunchConfiguration('esdf')),
     )
 
     def _backend_include(context):
@@ -337,6 +367,8 @@ def generate_launch_description():
         backend_save_arg,
         ground_segmentation_arg,
         occupancy_map_2d_arg,
+        costmap_arg,
+        esdf_arg,
         use_sim_time_arg,
         use_driver_arg,
         driver,
@@ -346,6 +378,8 @@ def generate_launch_description():
         filter_node,
         OpaqueFunction(function=_ground_segmentation),
         occupancy_map_2d,
+        costmap_2d,
+        esdf,
         OpaqueFunction(function=_backend_include),
         OpaqueFunction(function=_octomap_and_rviz),
     ])
