@@ -65,9 +65,10 @@
             scan_bodyframe_pub_en: true   # LOCAL PATCH P2:octomap 必须吃机体系点云,否则射线全从原点射出
 
         pcd_save:
-            # LOCAL PATCH P6:上游为 false。先验点云用于重定位/先验地图。
-            # 只在正常退出(Ctrl+C)时写 ROOT_DIR/PCD/scans.pcd(编译期源码目录),kill -9 不写。
+            # 已关闭:退出时不再写 PCD/scans.pcd(未回环校正的原始点云)。
+            # 需要先验地图时用 point_lio_backend 的 PCD/backend_map.pcd(map 系,已校正);
+            # 临时需要原始点云可 `just slam pcd_save:=true` 覆盖 yaml。
             # interval=-1 单文件内存增长约 0.5 MB/s,40 min 内安全;长测改 6000(10 min/文件)。
-            pcd_save_en: true
+            pcd_save_en: false
             interval: -1                 # how many LiDAR frames saved in each pcd file;
             # -1 : all frames will be saved in ONE pcd file, may lead to memory crash when having too much frames.
