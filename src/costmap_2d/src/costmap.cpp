@@ -21,7 +21,7 @@ RollingCostmap::RollingCostmap(const CostmapParams& params) : params_(params) {
   const int height = std::max(4, static_cast<int>(std::lround(params_.height / params_.resolution)));
   params_.width = width * params_.resolution;
   params_.height = height * params_.resolution;
-  params_.recenter_margin = std::max(0.0, params_.recenter_margin);
+  params_.recenter_distance = std::max(0.05, params_.recenter_distance);
   params_.max_range = std::max(0.1, params_.max_range);
   params_.blind_hold_sec = std::max(0.0, params_.blind_hold_sec);
   params_.raycast_dedupe_deg = std::max(0.0, params_.raycast_dedupe_deg);
@@ -37,8 +37,51 @@ RollingCostmap::RollingCostmap(const CostmapParams& params) : params_(params) {
   occupied_decay_ = static_cast<float>(params_.occupied_decay);
   free_decay_ = static_cast<float>(params_.free_decay);
   max_range2_ = params_.max_range * params_.max_range;
+  params_.ground_percentile = std::min(0.9, std::max(0.0, params_.ground_percentile));
+  ground_smoothing_ = std::min(1.0, std::max(0.01, params_.ground_smoothing));
 
   allocate(width, height, -0.5 * params_.width, -0.5 * params_.height);
+}
+
+void RollingCostmap::updateGroundLevel(const PointCloudT& ground,
+                                       const Eigen::Isometry3d& sensor_to_map) {
+  if (!params_.ground_relative) {
+    clear_min_z_ = static_cast<float>(params_.clear_min_z);
+    clear_max_z_ = static_cast<float>(params_.clear_max_z);
+    obstacle_min_z_ = static_cast<float>(params_.obstacle_min_z);
+    obstacle_max_z_ = static_cast<float>(params_.obstacle_max_z);
+    return;
+  }
+
+  const Eigen::Vector3d sensor = sensor_to_map.translation();
+  const double radius = std::max(0.5, params_.ground_radius);
+  std::vector<float> heights;
+  heights.reserve(ground.points.size());
+  for (const auto& point : ground.points) {
+    if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) continue;
+    const Eigen::Vector3d world = sensor_to_map * Eigen::Vector3d(point.x, point.y, point.z);
+    const double dx = world.x() - sensor.x();
+    const double dy = world.y() - sensor.y();
+    if (dx * dx + dy * dy > radius * radius) continue;
+    heights.push_back(static_cast<float>(world.z()));
+  }
+  if (heights.empty()) return;
+
+  const size_t index = static_cast<size_t>(params_.ground_percentile * (heights.size() - 1));
+  std::nth_element(heights.begin(), heights.begin() + static_cast<long>(index), heights.end());
+  const double estimate = heights[index];
+  if (!ground_valid_) {
+    ground_z_ = estimate;
+    ground_valid_ = true;
+  } else {
+    ground_z_ += ground_smoothing_ * (estimate - ground_z_);
+  }
+
+  const double offset = ground_z_;
+  clear_min_z_ = static_cast<float>(params_.clear_min_z + offset);
+  clear_max_z_ = static_cast<float>(params_.clear_max_z + offset);
+  obstacle_min_z_ = static_cast<float>(params_.obstacle_min_z + offset);
+  obstacle_max_z_ = static_cast<float>(params_.obstacle_max_z + offset);
 }
 
 void RollingCostmap::allocate(int width, int height, double origin_x, double origin_y) {
@@ -71,8 +114,7 @@ bool RollingCostmap::needsRecenter(double robot_x, double robot_y) const {
   const double center_y = origin_y_ + 0.5 * params_.height;
   const double dx = std::abs(robot_x - center_x);
   const double dy = std::abs(robot_y - center_y);
-  const double limit = 0.5 * params_.recenter_margin * params_.width;
-  return dx > limit || dy > limit;
+  return dx > params_.recenter_distance || dy > params_.recenter_distance;
 }
 
 void RollingCostmap::recenter(double robot_x, double robot_y) {
@@ -166,7 +208,7 @@ void RollingCostmap::castRay(int start_x, int start_y, int end_x, int end_y, dou
     if (x == end_x && y == end_y) return;
 
     const double z = z_start + (t / span) * z_span;
-    if (z < params_.clear_min_z || z > params_.clear_max_z) continue;
+    if (z < clear_min_z_ || z > clear_max_z_) continue;
 
     const size_t p = position(x, y);
     if (log_odds_[p] >= ray_block_threshold_) return;
@@ -180,7 +222,7 @@ void RollingCostmap::clearGround(const PointCloudT& ground, const Eigen::Isometr
     if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z)) continue;
     const Eigen::Vector3d world =
         sensor_to_map * Eigen::Vector3d(point.x, point.y, point.z);
-    if (world.z() < params_.clear_min_z || world.z() > params_.clear_max_z) continue;
+    if (world.z() < clear_min_z_ || world.z() > clear_max_z_) continue;
     int cx = 0;
     int cy = 0;
     if (!index(world.x(), world.y(), &cx, &cy)) continue;
@@ -212,7 +254,7 @@ void RollingCostmap::castObstacles(const PointCloudT& nonground,
     const double dz = world.z() - origin.z();
     const double distance2 = dx * dx + dy * dy + dz * dz;
     if (distance2 > max_range2_) continue;
-    if (world.z() < params_.obstacle_min_z || world.z() > params_.obstacle_max_z) continue;
+    if (world.z() < obstacle_min_z_ || world.z() > obstacle_max_z_) continue;
 
     if (buckets > 0) {
       double azimuth = std::atan2(dy, dx);
@@ -247,6 +289,7 @@ void RollingCostmap::castObstacles(const PointCloudT& nonground,
 
 void RollingCostmap::update(const PointCloudT& ground, const PointCloudT& nonground,
                             const Eigen::Isometry3d& sensor_to_map, double now_sec) {
+  updateGroundLevel(ground, sensor_to_map);
   clearGround(ground, sensor_to_map, now_sec);
   castObstacles(nonground, sensor_to_map, now_sec);
   ++version_;

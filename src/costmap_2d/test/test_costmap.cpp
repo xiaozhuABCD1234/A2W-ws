@@ -19,7 +19,7 @@ CostmapParams makeParams() {
   params.resolution = 0.1;
   params.width = 10.0;
   params.height = 10.0;
-  params.recenter_margin = 0.5;
+  params.recenter_distance = 0.6;
   params.max_range = 8.0;
   params.blind_hold_sec = 1.0;
   params.raycast_dedupe_deg = 0.0;
@@ -172,6 +172,8 @@ TEST(CostmapTest, recenterKeepsObservedCells) {
   costmap.update(ground, wall, Eigen::Isometry3d::Identity(), 0.0);
 
   EXPECT_FALSE(costmap.needsRecenter(0.2, 0.0));
+  EXPECT_FALSE(costmap.needsRecenter(0.55, 0.0));
+  EXPECT_TRUE(costmap.needsRecenter(0.7, 0.0));
   EXPECT_TRUE(costmap.needsRecenter(3.0, 0.0));
   costmap.recenter(1.0, 0.0);
 
@@ -180,6 +182,40 @@ TEST(CostmapTest, recenterKeepsObservedCells) {
   int8_t value = -1;
   ASSERT_TRUE(cellAt(snapshot, 1.55, 0.0, &value));
   EXPECT_GT(value, 50) << "滚动窗口平移后已观测的障碍应保留";
+}
+
+TEST(CostmapTest, slopeTrackingKeepsObstaclesInsideBand) {
+  CostmapParams params = makeParams();
+  params.ground_relative = true;
+  params.ground_smoothing = 1.0;
+  params.ground_percentile = 0.5;
+  params.ground_radius = 6.0;
+  RollingCostmap costmap(params);
+  costmap.reset(0.0, 0.0);
+
+  PointCloudT slope;
+  for (int i = -10; i <= 10; ++i) {
+    for (int j = -10; j <= 10; ++j) {
+      pcl::PointXYZI point;
+      point.x = static_cast<float>(0.2 * i);
+      point.y = static_cast<float>(0.2 * j);
+      point.z = -2.0f;
+      point.intensity = 1.0f;
+      slope.push_back(point);
+    }
+  }
+  const PointCloudT wall = makeWall(3.0, -1.0, 1.0, -1.5);
+  costmap.update(slope, wall, Eigen::Isometry3d::Identity(), 0.0);
+  EXPECT_NEAR(costmap.groundZ(), -2.0, 0.05);
+
+  CostmapSnapshot snapshot;
+  costmap.takeSnapshot(&snapshot);
+  int8_t wall_value = -1;
+  int8_t floor_value = -1;
+  ASSERT_TRUE(cellAt(snapshot, 3.05, 0.0, &wall_value));
+  ASSERT_TRUE(cellAt(snapshot, 1.0, 0.0, &floor_value));
+  EXPECT_GT(wall_value, 50);
+  EXPECT_LT(floor_value, 50);
 }
 
 TEST(CostmapTest, clearResetsToUnknown) {

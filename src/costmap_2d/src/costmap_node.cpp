@@ -83,7 +83,8 @@ class CostmapNode : public rclcpp::Node {
     params_.resolution = param<double>("window.resolution", params_.resolution);
     params_.width = param<double>("window.width", params_.width);
     params_.height = param<double>("window.height", params_.height);
-    params_.recenter_margin = param<double>("window.recenter_margin", params_.recenter_margin);
+    params_.recenter_distance =
+        param<double>("window.recenter_distance", params_.recenter_distance);
     params_.max_range = param<double>("window.max_range", params_.max_range);
     params_.clear_min_z = param<double>("z.clear_min", params_.clear_min_z);
     params_.clear_max_z = param<double>("z.clear_max", params_.clear_max_z);
@@ -97,6 +98,10 @@ class CostmapNode : public rclcpp::Node {
         param<double>("fuse.ray_block_probability", params_.ray_block_probability);
     params_.free_ray_occupied_delta =
         param<double>("fuse.free_ray_occupied_delta", params_.free_ray_occupied_delta);
+    params_.ground_relative = param<bool>("z.ground_relative", params_.ground_relative);
+    params_.ground_radius = param<double>("z.ground_radius", params_.ground_radius);
+    params_.ground_percentile = param<double>("z.ground_percentile", params_.ground_percentile);
+    params_.ground_smoothing = param<double>("z.ground_smoothing", params_.ground_smoothing);
     params_.blind_hold_sec = param<double>("fuse.blind_hold_sec", params_.blind_hold_sec);
     params_.occupied_decay = param<double>("fuse.occupied_decay", params_.occupied_decay);
     params_.free_decay = param<double>("fuse.free_decay", params_.free_decay);
@@ -189,6 +194,12 @@ class CostmapNode : public rclcpp::Node {
         }
         costmap_->update(*ground, *nonground, sensor_to_map, start);
         started_ = true;
+        if (params_.ground_relative) {
+          RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 5000,
+                               "costmap occupied=%zu ground_z=%+.2f m relative_z=%s",
+                               costmap_->occupiedCells(), costmap_->groundZ(),
+                               costmap_->hasGround() ? "on" : "off");
+        }
       }
     } catch (const std::exception& exception) {
       RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 2000, "costmap update skipped: %s",

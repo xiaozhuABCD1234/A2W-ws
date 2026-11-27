@@ -19,7 +19,7 @@ struct CostmapParams {
   double resolution = 0.05;
   double width = 10.0;
   double height = 10.0;
-  double recenter_margin = 0.5;
+  double recenter_distance = 0.6;
   double max_range = 8.0;
   double clear_min_z = -0.30;
   double clear_max_z = 1.30;
@@ -31,6 +31,10 @@ struct CostmapParams {
   double max_log_odds = 3.5;
   double ray_block_probability = 0.90;
   double free_ray_occupied_delta = 0.25;
+  bool ground_relative = true;
+  double ground_radius = 4.0;
+  double ground_percentile = 0.15;
+  double ground_smoothing = 0.3;
   double blind_hold_sec = 2.0;
   double occupied_decay = 0.12;
   double free_decay = 0.02;
@@ -70,6 +74,10 @@ class RollingCostmap {
 
   size_t occupiedCells() const { return occupied_cells_; }
 
+  double groundZ() const { return ground_z_; }
+
+  bool hasGround() const { return ground_valid_; }
+
   uint64_t version() const { return version_; }
 
   double resolution() const { return params_.resolution; }
@@ -94,6 +102,7 @@ class RollingCostmap {
                double now_sec);
   void clearGround(const PointCloudT& ground, const Eigen::Isometry3d& sensor_to_map,
                    double now_sec);
+  void updateGroundLevel(const PointCloudT& ground, const Eigen::Isometry3d& sensor_to_map);
   void castObstacles(const PointCloudT& nonground, const Eigen::Isometry3d& sensor_to_map,
                      double now_sec);
   size_t countOccupied() const;
@@ -116,6 +125,14 @@ class RollingCostmap {
 
   std::vector<float> log_odds_;
   std::vector<float> last_seen_;
+
+  double ground_z_ = 0.0;
+  bool ground_valid_ = false;
+  double ground_smoothing_ = 0.3;
+  float clear_min_z_ = -0.30f;
+  float clear_max_z_ = 1.30f;
+  float obstacle_min_z_ = 0.05f;
+  float obstacle_max_z_ = 1.50f;
 
   size_t occupied_cells_ = 0;
   uint64_t version_ = 0;

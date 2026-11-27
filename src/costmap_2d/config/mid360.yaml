@@ -6,16 +6,20 @@
     map_topic: /costmap_2d/grid
 
     runtime.stamp_tolerance: 0.05
-    runtime.publish_period_ms: 200
+    runtime.publish_period_ms: 100
     runtime.decay_period_ms: 200
     runtime.tf_timeout_ms: 100
 
     window.resolution: 0.05
     window.width: 10.0
     window.height: 10.0
-    window.recenter_margin: 0.5
+    window.recenter_distance: 0.6
     window.max_range: 8.0
 
+    z.ground_relative: true
+    z.ground_radius: 4.0
+    z.ground_percentile: 0.15
+    z.ground_smoothing: 0.3
     z.clear_min: -0.30
     z.clear_max: 1.30
     z.obstacle_min: 0.05
